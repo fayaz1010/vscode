@@ -1,0 +1,245 @@
+{
+  "name": "anchortrails",
+  "displayName": "AnchorTrails",
+  "description": "AT MUWT composer — talks to the local AnchorTrails node. No MCP dump.",
+  "publisher": "anchortrails",
+  "version": "0.0.1",
+  "icon": "media/icon.png",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "enabledApiProposals": [
+    "defaultChatParticipant",
+    "languageModelToolSupportsModel",
+    "chatProvider"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "*",
+    "onStartupFinished",
+    "onCommand:anchortrails.signIn",
+    "onAuthenticationRequest:anchortrails",
+    "onLanguageModelChatProvider:anchortrails",
+    "onChatParticipant:anchortrails.chat"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "anchortrails",
+        "displayName": "AnchorTrails"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "anchortrails.chat",
+        "name": "at",
+        "fullName": "AnchorTrails",
+        "description": "MUWT composer — assign owns the model. Keys via util-ai / vault on the node. Planning summons OzFactory DESIGN→PLAN when assigned.",
+        "isDefault": true,
+        "isSticky": true,
+        "modes": [
+          "ask",
+          "agent",
+          "edit"
+        ],
+        "commands": [
+          {
+            "name": "plan",
+            "description": "Ask about the plan against the final objective. Add refresh to rescore done vs planned."
+          },
+          {
+            "name": "refresh",
+            "description": "Rescore the plan from what is done and planned against the goal."
+          }
+        ]
+      }
+    ],
+    "authentication": [
+      {
+        "id": "anchortrails",
+        "label": "AnchorTrails"
+      }
+    ],
+    "commands": [
+      {
+        "command": "anchortrails.signIn",
+        "title": "AnchorTrails: Sign In"
+      },
+      {
+        "command": "anchortrails.accountStatus",
+        "title": "AnchorTrails: Account"
+      },
+      {
+        "command": "anchortrails.plan.show",
+        "title": "AnchorTrails: Show Plan"
+      },
+      {
+        "command": "anchortrails.panel.show",
+        "title": "AnchorTrails: Show AT Panel"
+      },
+      {
+        "command": "anchortrails.home.openEditor",
+        "title": "AnchorTrails: Open AT Panel"
+      },
+      {
+        "command": "anchortrails.surface.pick",
+        "title": "AnchorTrails: Pick surface"
+      },
+      {
+        "command": "anchortrails.plan.refresh",
+        "title": "Refresh Plan",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "anchortrails.panel.refresh",
+        "title": "Refresh AT Panel",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "anchortrails.settings.show",
+        "title": "AnchorTrails: Settings"
+      },
+      {
+        "command": "anchortrails.settings.scan",
+        "title": "AnchorTrails: Scan env files"
+      },
+      {
+        "command": "anchortrails.viewer.close",
+        "title": "AnchorTrails: Close viewer"
+      },
+      {
+        "command": "anchortrails.desktop.stream",
+        "title": "AnchorTrails: Stream desktop"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "anchortrails",
+          "title": "AnchorTrails",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "anchortrails": [
+        {
+          "type": "webview",
+          "id": "anchortrails.plan",
+          "name": "Plan"
+        },
+        {
+          "type": "webview",
+          "id": "anchortrails.home",
+          "name": "AT"
+        },
+        {
+          "id": "anchortrails.nodes",
+          "name": "Nodes"
+        },
+        {
+          "id": "anchortrails.teams",
+          "name": "Teams"
+        },
+        {
+          "id": "anchortrails.vault",
+          "name": "Vault"
+        },
+        {
+          "id": "anchortrails.models",
+          "name": "Models"
+        },
+        {
+          "id": "anchortrails.workspace",
+          "name": "Workspace"
+        },
+        {
+          "type": "webview",
+          "id": "anchortrails.settings",
+          "name": "Settings"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "anchortrails.home",
+        "contents": "AT Panel. Pick a job to load its tools. Chat is the work surface."
+      },
+      {
+        "view": "anchortrails.plan",
+        "contents": "No MUWT plan yet. Send a real task in @at chat and the current [>] step lands here."
+      },
+      {
+        "view": "anchortrails.nodes",
+        "contents": "Mesh nodes appear here after they join. Hops stay on the node."
+      },
+      {
+        "view": "anchortrails.teams",
+        "contents": "Clustry members. Configure Clustry on the node to see the roster."
+      },
+      {
+        "view": "anchortrails.vault",
+        "contents": "Vault settings are posture only. Keys stay on the node. Never printed."
+      }
+    ],
+    "menus": {
+      "accounts": [
+        {
+          "command": "anchortrails.signIn",
+          "when": "!anchortrails.signedIn"
+        },
+        {
+          "command": "anchortrails.accountStatus",
+          "when": "anchortrails.signedIn"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "anchortrails.panel.refresh",
+          "when": "view == anchortrails.home || view == anchortrails.plan || view == anchortrails.nodes || view == anchortrails.teams || view == anchortrails.vault || view == anchortrails.models || view == anchortrails.workspace",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configurationDefaults": {
+      "chat.mcp.access": "none",
+      "chat.mcp.gallery.enabled": false,
+      "chat.mcp.discovery.enabled": false,
+      "workbench.colorTheme": "Dark 2026",
+      "workbench.experimental.modernUI": false,
+      "editor.fontLigatures": false,
+      "workbench.sideBar.location": "left",
+      "workbench.startupEditor": "none",
+      "workbench.panel.defaultLocation": "bottom",
+      "workbench.panel.opensMaximized": "never",
+      "workbench.secondarySideBar.defaultVisibility": "visible",
+      "workbench.editor.limit.enabled": false,
+      "workbench.welcomePage.walkthroughs.hideOnStartup": true,
+      "extensions.ignoreRecommendations": true,
+      "github.copilot.enable": { "*": false },
+      "chat.agentHost.codexAgent.enabled": false,
+      "chat.editor.codex.preferAgentHost": false,
+      "window.title": "AnchorTrails${separator}${activeEditorShort}${separator}${rootName}",
+      "chat.commandCenter.enabled": true
+    },
+    "configuration": {
+      "title": "AnchorTrails",
+      "properties": {
+        "anchortrails.bridgeUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "Local HTTP bridge. Same default as mesh-app."
+        },
+        "anchortrails.bridgeToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token. Empty = ANCHORTRAILS_BRIDGE_TOKEN or ~/.anchortrails/bridge_token."
+        }
+      }
+    }
+  }
+}

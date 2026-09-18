@@ -258,10 +258,15 @@ export function getChatSetupDialogButtons(entitlement: ChatEntitlement, options:
 		const appleProviderButton = button(localize('continueWith', "Continue with {0}", providers.apple.name), ChatSetupStrategy.SetupWithAppleProvider, 'continue-button', 'apple');
 		const microsoftProviderButton = button(localize('continueWith', "Continue with {0}", providers.microsoft.name), ChatSetupStrategy.SetupWithMicrosoftProvider, 'continue-button', 'microsoft');
 
-		const socialProviderButtons = [googleProviderButton, appleProviderButton, ...(showMicrosoftProvider ? [microsoftProviderButton] : [])];
-		const providerButtons = enterpriseAuthentication
-			? [enterpriseProviderButton, ...socialProviderButtons, defaultProviderLink]
-			: [defaultProviderButton, ...socialProviderButtons, enterpriseProviderLink];
+		const named = (p?: { id?: string; name?: string }) => !!(p?.id && p?.name);
+		const socialProviderButtons = [
+			named(providers.google) ? googleProviderButton : undefined,
+			named(providers.apple) ? appleProviderButton : undefined,
+			...(showMicrosoftProvider && named(providers.microsoft) ? [microsoftProviderButton] : []),
+		].filter((b): b is IChatSetupDialogButton => !!b);
+		const providerButtons = enterpriseAuthentication && named(providers.enterprise)
+			? [enterpriseProviderButton, ...socialProviderButtons, ...(named(providers.default) && providers.default.id !== providers.enterprise.id ? [defaultProviderLink] : [])]
+			: [defaultProviderButton, ...socialProviderButtons, ...(named(providers.enterprise) && providers.enterprise.id !== providers.default.id ? [enterpriseProviderLink] : [])];
 		return options?.allowContinueWithoutSignIn
 			? [...providerButtons, button(localize('continueWithoutSigningIn', "Continue Without Signing In"), ChatSetupStrategy.Canceled, 'link-button')]
 			: providerButtons;

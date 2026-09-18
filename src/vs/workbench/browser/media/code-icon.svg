@@ -1,1 +1,26 @@
-<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><style>.st0{fill:#f6f6f6;fill-opacity:0}.st1{fill:#fff}.st2{fill:#167abf}</style><path class="st0" d="M1024 1024H0V0h1024v1024z"/><path class="st1" d="M1024 85.333v853.333H0V85.333h1024z"/><path class="st2" d="M0 85.333h298.667v853.333H0V85.333zm1024 0v853.333H384V85.333h640zm-554.667 160h341.333v-64H469.333v64zm341.334 533.334H469.333v64h341.333l.001-64zm128-149.334H597.333v64h341.333l.001-64zm0-149.333H597.333v64h341.333l.001-64zm0-149.333H597.333v64h341.333l.001-64z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#6C8CFF" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#0A0A0F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="core" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8AA4FF"/>
+      <stop offset="100%" stop-color="#4A6AE0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="184.32" fill="#0A0A0F"/>
+  <rect width="1024" height="1024" rx="184.32" fill="url(#glow)"/>
+  <g opacity="0.9">
+    <line x1="512" y1="512" x2="512" y2="286.72" stroke="#6C8CFF" stroke-width="18.432" stroke-linecap="round" opacity="0.85"/>
+    <line x1="512" y1="512" x2="707.09248" y2="624.64" stroke="#6C8CFF" stroke-width="18.432" stroke-linecap="round" opacity="0.85"/>
+    <line x1="512" y1="512" x2="316.90752" y2="624.64" stroke="#6C8CFF" stroke-width="18.432" stroke-linecap="round" opacity="0.85"/>
+    <line x1="512" y1="286.72" x2="707.09248" y2="624.64" stroke="#6C8CFF" stroke-width="12.288" stroke-linecap="round" opacity="0.45"/>
+    <line x1="707.09248" y1="624.64" x2="316.90752" y2="624.64" stroke="#6C8CFF" stroke-width="12.288" stroke-linecap="round" opacity="0.45"/>
+    <line x1="316.90752" y1="624.64" x2="512" y2="286.72" stroke="#6C8CFF" stroke-width="12.288" stroke-linecap="round" opacity="0.45"/>
+  </g>
+  <circle cx="512" cy="286.72" r="87.04" fill="#4A6AE0" stroke="#6C8CFF" stroke-width="8.192"/>
+    <circle cx="707.09248" cy="624.64" r="87.04" fill="#4A6AE0" stroke="#6C8CFF" stroke-width="8.192"/>
+    <circle cx="316.90752" cy="624.64" r="87.04" fill="#4A6AE0" stroke="#6C8CFF" stroke-width="8.192"/>
+  <circle cx="512" cy="512" r="117.50400000000002" fill="url(#core)" stroke="#A8BCFF" stroke-width="6.144"/>
+</svg>

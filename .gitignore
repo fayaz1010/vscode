@@ -50,6 +50,12 @@ dist
 .agents/skills/.local/
 .github/skills/.local/
 
+# Local dest toolchain (bundled Node) — do not publish
+.tools/
+
+# Dest extension test cache
+extensions/anchortrails/.pytest_cache/
+
 # Throwaway Code OSS dev profiles created by the launch skill
 .v[0-9]*/
 # Local agent validation evidence

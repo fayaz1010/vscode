@@ -49,9 +49,7 @@ export function hasSignedInCodexChatGPTAccount(account: ICodexAccountInfo, visib
 }
 
 export function shouldShowCodexAccount(configurationService: ICodexAccountVisibilityConfiguration, isSessionsWindow: boolean): boolean {
-	return configurationService.getValue<boolean>(ChatAIDisabledSettingId) !== true
-		&& configurationService.getValue<boolean>(AgentHostCodexAgentEnabledSettingId) === true
-		&& (isSessionsWindow || configurationService.getValue<boolean>(CodexPreferAgentHostEditorSettingId) === true);
+	return false;
 }
 
 export function createCodexAccountMenuActions(service: ICodexAccountService, visible = true): IAction[] {

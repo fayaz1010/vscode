@@ -37,15 +37,10 @@ set VSCODE_CLI=1
 set ELECTRON_ENABLE_LOGGING=1
 set ELECTRON_ENABLE_STACK_DUMPING=1
 
-set DISABLE_TEST_EXTENSION="--disable-extension=vscode.vscode-api-tests"
-for %%A in (%*) do (
-	if "%%~A"=="--extensionTestsPath" (
-		set DISABLE_TEST_EXTENSION=""
-	)
-)
+set AT_EXT=%~dp0..\extensions\anchortrails
 
 :: Launch Code
-%CODE% . %DISABLE_TEST_EXTENSION% %*
+%CODE% . --extensionDevelopmentPath="%AT_EXT%" --enable-proposed-api=anchortrails.anchortrails --disable-extension=vscode.vscode-api-tests --disable-extension=GitHub.copilot-chat --disable-extension=GitHub.copilot %*
 goto end
 
 :builtin
