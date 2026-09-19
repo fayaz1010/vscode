@@ -113,7 +113,7 @@ function register(vscode) {
   if (lm && typeof lm.registerTool === 'function') {
     return lm.registerTool(BUILTIN_CHECK, impl);
   }
-  return { dispose() {} };
+  return { dispose() { /* nothing was registered: nothing to release */ } };
 }
 
 module.exports = {
@@ -126,3 +126,4 @@ module.exports = {
   createImpl,
   register,
 };
+
