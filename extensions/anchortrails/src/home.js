@@ -26,7 +26,7 @@ function esc(value) {
     .replace(/"/g, '&quot;');
 }
 
-const { sessionId } = require('./workspace');
+const { sessionId, folderPath } = require('./workspace');
 const { stepListHtml, STEP_CSS, gatePlan } = require('./plan');
 const { shellHtml } = require('./at_shell');
 const { seedFrom } = require('./chat_seed');
@@ -111,6 +111,36 @@ function homeHtml(data, err) {
 </body></html>`;
 }
 
+// A finding opens its file at its line. The path is repo-relative; the root is the
+// map's own repo (what was analysed) and, failing that, the bound folder. Nothing
+// outside that root can be opened: a relative path that escapes it is refused
+// rather than resolved, for the same reason the bridge fences its own open-code.
+async function openCode(vscode, root, rel, line) {
+  const path = require('path');
+  if (!root || !rel) return false;
+  const abs = path.resolve(root, rel);
+  if (abs === path.resolve(root) || !abs.startsWith(path.resolve(root) + path.sep)) return false;
+  if (!vscode.Uri || !vscode.workspace || typeof vscode.workspace.openTextDocument !== 'function') return false;
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
+  const at = Math.max(0, Number(line || 1) - 1);
+  const opts = { preview: false };
+  if (vscode.Range) opts.selection = new vscode.Range(at, 0, at, 0);
+  if (vscode.window && typeof vscode.window.showTextDocument === 'function') {
+    await vscode.window.showTextDocument(doc, opts);
+  }
+  return true;
+}
+
+// The map's signature: when this is unchanged, a poll paints nothing.
+function mapSig(map) {
+  const m = (map && map.overview && map.overview.meta) || {};
+  const plan = map && map.plan;
+  return [m.generated_at, m.stages_done, m.status, m.findings_total, m.findings_actionable,
+    plan && plan.plan_id, plan && plan.revision].join('/');
+}
+
+const MAP_POLL_MS = 5000;
+
 function startHome(client, vscode, extras = {}) {
   let view = null;
   let editor = null;
@@ -118,6 +148,8 @@ function startHome(client, vscode, extras = {}) {
   let tab = 'plan';
   let lastCheck = null;
   let modelExtra = {};
+  let lastMap = null;
+  let pollTimer = null;
 
   function overlay(data) {
     if (!data || !lastCheck) return data;
@@ -139,6 +171,19 @@ function startHome(client, vscode, extras = {}) {
       if (msg.cmd === 'tab') {
         tab = msg.tab || 'plan';
         paint();
+        return;
+      }
+      if (msg.cmd === 'open-code') {
+        const [rel, line] = String(msg.id || '').split('#');
+        const root = (lastMap && lastMap.repo) || folderPath(vscode) || '';
+        try { await openCode(vscode, root, rel, Number(line) || 1); } catch { /* file may be gone */ }
+        return;
+      }
+      if (msg.cmd === 'show-task') {
+        // The task lives on the Plan tab; switch there and let the next paint carry
+        // the id so the shell can mark it. Nothing to fetch.
+        tab = 'plan';
+        paint({ focusTask: msg.task || '' });
         return;
       }
       if (msg.cmd === 'refresh') {
@@ -231,7 +276,7 @@ function startHome(client, vscode, extras = {}) {
     if (target && target.webview) target.webview.html = html;
   }
 
-  async function paint() {
+  async function paint(extra = {}) {
     if (!view && !editor) return;
     const fallback = overlay({ surface: 'auto', surfaces: FALLBACK_SURFACES, wide: Boolean(editor) });
     write(view, homeHtml(fallback));
@@ -240,9 +285,19 @@ function startHome(client, vscode, extras = {}) {
       const data = client && typeof client.sessionPanel === 'function'
         ? await client.sessionPanel({ session_id: sessionId(vscode) })
         : {};
+      // The map rides on the same paint. Its failure is its own -- a bridge that
+      // cannot read the map still has a plan to show, so this never throws into
+      // the panel's error path; it renders as "no map yet" instead.
+      let map = null;
+      if (client && typeof client.map === 'function') {
+        try { map = await client.map(); } catch (err) { map = { ok: false, reason: String((err && err.message) || err) }; }
+      }
+      lastMap = map;
       retries = 0;
       const next = {
         ...data,
+        map,
+        focusTask: extra.focusTask || '',
         wide: Boolean(editor),
         models: { ...((data && data.models) || {}), ...modelExtra },
       };
@@ -273,10 +328,32 @@ function startHome(client, vscode, extras = {}) {
     );
     editor.webview.options = { enableScripts: true };
     bindSurface(editor.webview);
+    // LIVE WHILE IT IS LOOKED AT. The editor used to repaint only on a click, so a
+    // re-map after a task closed never reached an open panel. A hidden tab pays
+    // nothing; a visible one asks the bridge every few seconds and repaints only
+    // when the map's signature moved.
+    const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+    const startPoll = () => {
+      if (pollTimer || !client || typeof client.map !== 'function') return;
+      pollTimer = setInterval(async () => {
+        if (!editor) return stopPoll();
+        try {
+          const fresh = await client.map();
+          if (mapSig(fresh) !== mapSig(lastMap)) await paint();
+        } catch { /* offline: try again next tick */ }
+      }, MAP_POLL_MS);
+    };
+    if (typeof editor.onDidChangeViewState === 'function') {
+      editor.onDidChangeViewState((e) => {
+        const visible = e && e.webviewPanel ? e.webviewPanel.visible : editor && editor.visible;
+        if (visible) startPoll(); else stopPoll();
+      });
+    }
     if (typeof editor.onDidDispose === 'function') {
-      editor.onDidDispose(() => { editor = null; });
+      editor.onDidDispose(() => { stopPoll(); editor = null; });
     }
     await paint();
+    if (editor && editor.visible !== false) startPoll();
     return editor;
   }
 
@@ -313,6 +390,7 @@ function startHome(client, vscode, extras = {}) {
     },
     openEditor,
     dispose() {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (sub && typeof sub.dispose === 'function') sub.dispose();
       if (editor && typeof editor.dispose === 'function') editor.dispose();
       for (const c of cmds) {
@@ -328,4 +406,6 @@ module.exports = {
   homeHtml,
   planStrip,
   startHome,
+  openCode,
+  mapSig,
 };

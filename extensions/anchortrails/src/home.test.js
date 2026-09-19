@@ -50,3 +50,47 @@ describe('AT Panel home', () => {
     assert.match(html, /cmd: 'seed'/);
   });
 });
+
+describe('the map in the editor host', () => {
+  const { openCode, mapSig } = require('./home');
+  const path = require('path');
+
+  function fakeVscode(opened) {
+    return {
+      Uri: { file: (p) => ({ fsPath: p }) },
+      Range: class { constructor(a, b, c, d) { this.start = { line: a, character: b }; this.end = { line: c, character: d }; } },
+      workspace: { openTextDocument: async (uri) => ({ uri }) },
+      window: { showTextDocument: async (doc, opts) => { opened.push({ doc, opts }); } },
+    };
+  }
+
+  it('opens the file at the line, inside the root', async () => {
+    const opened = [];
+    const ok = await openCode(fakeVscode(opened), '/r/backend', 'src/services/email.ts', 115);
+    assert.equal(ok, true);
+    assert.equal(opened[0].doc.uri.fsPath, path.resolve('/r/backend', 'src/services/email.ts'));
+    assert.equal(opened[0].opts.selection.start.line, 114, 'line 115 is zero-based 114');
+    assert.equal(opened[0].opts.preview, false);
+  });
+
+  it('refuses a path that escapes the root rather than resolving it', async () => {
+    const opened = [];
+    const ok = await openCode(fakeVscode(opened), '/r/backend', '../../etc/passwd', 1);
+    assert.equal(ok, false);
+    assert.equal(opened.length, 0);
+  });
+
+  it('refuses when there is no root to resolve against', async () => {
+    assert.equal(await openCode(fakeVscode([]), '', 'src/a.ts', 1), false);
+  });
+
+  it('the poll signature moves when the map or the plan does, and not otherwise', () => {
+    const a = { overview: { meta: { generated_at: 1, findings_actionable: 20 } }, plan: { plan_id: 'p', revision: 1 } };
+    const same = JSON.parse(JSON.stringify(a));
+    const fewer = JSON.parse(JSON.stringify(a)); fewer.overview.meta.findings_actionable = 13;
+    const replanned = JSON.parse(JSON.stringify(a)); replanned.plan.revision = 2;
+    assert.equal(mapSig(a), mapSig(same));
+    assert.notEqual(mapSig(a), mapSig(fewer));
+    assert.notEqual(mapSig(a), mapSig(replanned));
+  });
+});

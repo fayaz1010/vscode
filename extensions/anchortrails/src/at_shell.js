@@ -4,7 +4,7 @@
  * Nodes, Teams, Vault, Models, Workspace, Settings.
  */
 
-const { STEP_CSS, stackHtml } = require('./plan');
+const { STEP_CSS, stackHtml, mapHtml, MAP_CSS } = require('./plan');
 const { folderItems, historyItems, cardHtml } = require('./plan_board');
 const {
   rowsFromNodes,
@@ -104,10 +104,14 @@ function planHtml(data) {
     : '<p class="muted">No other plans yet.</p>';
   const main = liveCard || folderBody || '<p class="muted">No plan for this folder yet. A real task in @at chat starts one.</p>';
   const stack = stackHtml((live && live.stack) || (data && data.stack), esc);
+  // The map beside the stack. `data.map` is the bridge's /api/map envelope, fetched by
+  // the editor host on the same paint; absent renders as one muted line.
+  const map = mapHtml(data && data.map, esc);
   return `<p class="muted">${esc((workspace && (workspace.id || workspace.path)) || 'No folder open')}</p>
     <button data-cmd="refresh" class="refresh">Refresh plan</button>
     <p class="hint">Rescores done vs planned against the goal. /plan in chat asks; /plan refresh does the same. Double-click a card, step, node, or tile to put it in @at.</p>
     ${stack}
+    ${map}
     ${main}
     ${taskBody}
     <h3>Other plans</h3>
@@ -201,6 +205,7 @@ function shellHtml(data, tab, err) {
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 3px 4px; }
   ${STEP_CSS}
+  ${MAP_CSS}
 </style></head>
 <body>
   ${banner}

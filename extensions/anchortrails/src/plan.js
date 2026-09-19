@@ -144,6 +144,91 @@ function stackHtml(stack, esc) {
   return `<section class="stack"><h3>Stack</h3><div class="kvs">${items}</div></section>`;
 }
 
+/**
+ * The code map, beside the stack: what the map found, each finding linked to the
+ * task that closes it and the file it lives in.
+ *
+ * `map` is the bridge's /api/map envelope: { overview, plan, repo }. The task join
+ * reads the acceptance sentence -- "reports no `<marker>` for `<symbol>` in `<path>`"
+ * -- the same sentence acceptance.py reads back, so the plan needs no extra field.
+ * Links are `data-cmd` elements: the shell's generic handler already forwards
+ * `id` and `task`, so the webview script does not change at all.
+ *
+ * Absent is a state, not an error. A folder with no map yet says so in one line.
+ */
+const CHECK_RX = /reports no `([^`]+)` for `([^`]+)`(?: in `([^`]+)`)?/;
+
+function taskIndex(atPlan) {
+  const index = {};
+  for (const t of (atPlan && atPlan.tasks) || []) {
+    for (const a of t.acceptance || []) {
+      const m = CHECK_RX.exec(a.check || '');
+      if (!m) continue;
+      index[m[3] ? `${m[1]}|${m[3]}|${m[2]}` : `${m[1]}|${m[2]}|`] = t.id;
+    }
+  }
+  return index;
+}
+
+function mapHtml(map, esc) {
+  const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  if (!map || !map.ok || !map.overview) {
+    const why = (map && map.reason) || 'No map for this folder yet. Run repo-dash, or point ~/.anchortrails/map.json at its out/.';
+    return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p></section>`;
+  }
+  const meta = map.overview.meta || {};
+  const zones = [...(map.overview.zones || [])]
+    .filter((z) => (z.findings_total || 0) > 0)
+    .sort((a, b) => (b.colour || 0) - (a.colour || 0));
+  const index = taskIndex(map.plan);
+  const taskFor = (f) => index[`${f.marker}|${f.path}|${f.symbol}`] || index[`${f.marker}|${f.path}|`] || '';
+  const colour = (s) => (s >= 0.7 ? '#e2533f' : s >= 0.5 ? '#c2811f' : s >= 0.3 ? '#8a7b28' : '#6b7484');
+  const finding = (f) => {
+    const t = taskFor(f);
+    return `<div class="mrow">
+      <span class="msev" style="color:${colour(f.severity)}">${Number(f.severity || 0).toFixed(2)}</span>
+      <span class="mmark">${escape(f.marker)}</span>
+      <span class="msym">${escape(f.symbol)}</span>
+      <a href="#" data-cmd="open-code" data-id="${escape(f.path)}#${Number(f.line_start || 1)}" class="mcode">${escape(f.path)}:${Number(f.line_start || 1)} ↗</a>
+      ${t ? `<a href="#" data-cmd="show-task" data-task="${escape(t)}" class="mtask">→ ${escape(String(t).replace(/^t\./, ''))}</a>` : ''}
+    </div>`;
+  };
+  const zoneBlock = (z) => {
+    const top = (z.top || []).filter((f) => (f.severity || 0) >= 0.3).slice(0, 12);
+    return `<details class="mzone"${(z.colour || 0) >= 0.6 ? ' open' : ''}>
+      <summary><span class="mdot" style="background:${colour(z.colour || 0)}"></span><b>${escape(z.zone)}</b>
+        <span class="muted"> · ${Number(z.findings_total || 0)} finding${z.findings_total === 1 ? '' : 's'} · ${Number(z.files || 0)} files</span></summary>
+      ${top.map(finding).join('') || '<p class="muted">nothing at or above 0.30</p>'}
+    </details>`;
+  };
+  const planned = map.plan && Array.isArray(map.plan.tasks) ? map.plan.tasks.length : 0;
+  // One line, joined with the separator: a multi-line template put newlines between
+  // the pieces, which is invisible in a browser and wrong everywhere else.
+  const head = `<p class="muted">${[
+    escape(String(meta.repo || '').split(/[\\/]/).slice(-2).join('/')),
+    `${Number(meta.findings_actionable || 0)} actionable of ${Number(meta.findings_total || 0)}`,
+    planned ? `${planned} planned task${planned === 1 ? '' : 's'}` : 'no plan yet',
+    escape(meta.status === 'complete' ? 'complete' : (meta.status || 'building')),
+  ].join(' · ')}</p>`;
+  const body = zones.length
+    ? zones.map(zoneBlock).join('')
+    : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
+  return `<section class="map"><h3>Map</h3>${head}${body}</section>`;
+}
+
+const MAP_CSS = `
+  .map .mrow { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; padding:4px 0;
+    border-top:1px solid var(--vscode-widget-border,#333); font-size:11.5px; }
+  .map .msev { font-weight:600; min-width:2.6em; }
+  .map .mmark { opacity:.65; }
+  .map .msym { font-weight:600; }
+  .map .mcode { opacity:.75; text-decoration:none; color:inherit; }
+  .map .mcode:hover { opacity:1; text-decoration:underline; }
+  .map .mtask { padding:1px 7px; border-radius:9px; background:#2d6a5a33; color:#7fd3b9; text-decoration:none; }
+  .map .mzone { margin:6px 0; } .map summary { cursor:pointer; }
+  .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+`;
+
 function stackLines(stack) {
   const row = stack || {};
   return STACK_KEYS.map(([key, label]) => {
@@ -271,6 +356,9 @@ module.exports = {
   STEP_CSS,
   STACK_KEYS,
   stackHtml,
+  mapHtml,
+  taskIndex,
+  MAP_CSS,
   stackLines,
   rowsFromPlan,
   startPlan,

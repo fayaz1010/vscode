@@ -82,3 +82,54 @@ describe('plan panel', () => {
     assert.match(rows[0].label, /No plan/);
   });
 });
+
+describe('the map beside the stack', () => {
+  const { mapHtml, taskIndex } = require('./plan');
+  const esc = (v) => String(v ?? '');
+  const MAP = {
+    ok: true, repo: '/r/backend',
+    overview: {
+      meta: { repo: '/r/backend', status: 'complete', findings_total: 24, findings_actionable: 20 },
+      zones: [{
+        zone: 'src/services', colour: 0.8, findings_total: 2, files: 5,
+        top: [
+          { marker: 'never_referenced', symbol: 'sendPaymentReminder', path: 'src/services/email.ts', line_start: 115, severity: 0.6 },
+          { marker: 'config_orphan', symbol: 'GEMINI_KEY', path: 'src/config/gemini.ts', line_start: 3, severity: 0.51 },
+        ],
+      }],
+    },
+    plan: { plan_id: 'p', revision: 1, tasks: [{
+      id: 't.src-services-email.ts',
+      acceptance: [{ check: 'repo-dash reports no `never_referenced` for `sendPaymentReminder` in `src/services/email.ts`' }],
+    }] },
+  };
+
+  it('a folder with no map says so in one muted line, not an error', () => {
+    const html = mapHtml({ ok: false, reason: 'no map at /x' }, esc);
+    assert.match(html, /class="muted">no map at \/x/);
+    assert.doesNotMatch(html, /class="warn"/);
+  });
+
+  it('every finding links to its file at its line through the generic data-cmd handler', () => {
+    const html = mapHtml(MAP, esc);
+    assert.match(html, /data-cmd="open-code" data-id="src\/services\/email\.ts#115"/);
+    assert.match(html, /data-cmd="open-code" data-id="src\/config\/gemini\.ts#3"/);
+  });
+
+  it('a finding the plan owns links to its task; one it does not has no task link', () => {
+    const html = mapHtml(MAP, esc);
+    assert.match(html, /data-cmd="show-task" data-task="t\.src-services-email\.ts"/);
+    // gemini.ts has no task in this plan
+    const gemini = html.slice(html.indexOf('gemini.ts'));
+    assert.doesNotMatch(gemini.slice(0, 300), /show-task/);
+  });
+
+  it('the join reads the acceptance sentence itself, so the plan needs no extra field', () => {
+    const idx = taskIndex(MAP.plan);
+    assert.equal(idx['never_referenced|src/services/email.ts|sendPaymentReminder'], 't.src-services-email.ts');
+  });
+
+  it('the head says how much is actionable and whether a plan exists', () => {
+    assert.match(mapHtml(MAP, esc), /20 actionable of 24 · 1 planned task · complete/);
+  });
+});

@@ -112,6 +112,22 @@ class BridgeClient {
     return data;
   }
 
+  // THE CODE MAP. Read-only, behind the same bearer as everything else here:
+  // the webview never reads repo-dash's out/ directory itself, the bridge does.
+  // A missing map comes back as { ok:false, reason } -- a state, not a throw --
+  // so the panel can say "no map yet" instead of painting an error banner.
+  async map() {
+    const { r, data } = await this._json('GET', '/api/map');
+    if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
+    return data;
+  }
+
+  async mapZone(slug) {
+    const { r, data } = await this._json('GET', `/api/map/zones/${encodeURIComponent(slug)}`);
+    if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
+    return data;
+  }
+
   async health() {
     const { r, data } = await this._json('GET', '/api/health');
     if (data.service !== 'anchortrails' && typeof data.tool_count !== 'number') {
