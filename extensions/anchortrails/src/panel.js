@@ -234,7 +234,30 @@ function startPanel(client, vscode, extras = {}) {
   function makeProvider(pickRows) {
     const emitter = vscode.window
       ? new vscode.EventEmitter()
-      : { event: () => {}, fire() {}, dispose() {} };
+      : { 
+          listeners: [],
+          event: function(listener) {
+            this.listeners.push(listener);
+            return {
+              dispose: () => {
+                const index = this.listeners.indexOf(listener);
+                if (index > -1) {
+                  this.listeners.splice(index, 1);
+                }
+              }
+            };
+          },
+          fire: function(data) {
+            this.listeners.forEach(listener => {
+              if (typeof listener === 'function') {
+                listener(data);
+              }
+            });
+          },
+          dispose: function() {
+            this.listeners = [];
+          }
+        };
     emitters.push(emitter);
     return {
       onDidChangeTreeData: emitter.event,
@@ -312,6 +335,10 @@ function startPanel(client, vscode, extras = {}) {
         if (c && typeof c.dispose === 'function') c.dispose();
       }
       for (const p of Object.values(providers)) p.dispose();
+      for (const e of emitters) {
+        if (e && typeof e.dispose === 'function') e.dispose();
+      }
+      emitters.length = 0;
     },
   };
 }
