@@ -122,6 +122,15 @@ class BridgeClient {
     return data;
   }
 
+  // The one write on the map surface: ask the bridge to re-run the mapper it was
+  // configured with. Returns at once; progress arrives through map() as
+  // overview.meta.status moves from `streaming` to `complete`.
+  async mapRefresh() {
+    const { r, data } = await this._json('POST', '/api/map/refresh', {});
+    if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
+    return data;
+  }
+
   async mapZone(slug) {
     const { r, data } = await this._json('GET', `/api/map/zones/${encodeURIComponent(slug)}`);
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };

@@ -136,4 +136,31 @@ describe('the map beside the stack', () => {
   it('the head says how much is actionable and whether a plan exists', () => {
     assert.match(mapHtml(MAP, esc), /20 actionable of 24 · 1 planned task · complete/);
   });
+
+  it('a task the run closed is marked on its finding; a failed one says why', () => {
+    const { runIndex, runMark, runSummary } = require('./plan');
+    const run = { dry_run: false, cost_usd: 0.0234, results: [
+      { task: 't.src-services-email.ts', outcome: 'closed', cost_usd: 0.003 },
+      { task: 't.other', outcome: 'failed', why: 'review rejected: gamed the marker' },
+    ] };
+    assert.equal(runIndex(run)['t.other'].outcome, 'failed');
+    assert.equal(runMark(runIndex(run)['t.other']).mark, '✗');
+    assert.equal(runMark(undefined).mark, '', 'no run row: no mark, the plain link');
+    assert.equal(runSummary(run), 'run: 1 closed · 1 failed · $0.02');
+    assert.equal(runSummary({ dry_run: true, results: [] }), '', 'a dry run is not a run');
+    const html = mapHtml({ ...MAP, run }, esc);
+    assert.match(html, /class="mtask m-closed" title="closed">✓ src-services-email\.ts</);
+    assert.match(html, /run: 1 closed · 1 failed · \$0\.02/);
+  });
+
+  it('a map that is being rebuilt says which stage it is on, and offers Re-map only when the bridge can', () => {
+    const building = JSON.parse(JSON.stringify(MAP));
+    building.overview.meta = { ...building.overview.meta, status: 'streaming', stages_done: 3, stages_total: 6, stage: 'Tier A: absence' };
+    const html = mapHtml({ ...building, can_refresh: true }, esc);
+    assert.match(html, /mapping 3\/6 · Tier A: absence/);
+    assert.match(html, /<section class="map building">/);
+    assert.match(html, /data-cmd="map-refresh"/);
+    assert.doesNotMatch(mapHtml(MAP, esc), /map-refresh/, 'no mapper declared: no button');
+    assert.match(mapHtml({ ok: false, reason: 'no map', can_refresh: true }, esc), /map-refresh/, 'no map yet, but one can be made: the button is the way to make it');
+  });
 });

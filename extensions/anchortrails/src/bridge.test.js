@@ -100,6 +100,26 @@ describe('BridgeClient', () => {
     assert.ok(!JSON.stringify(out).includes('secret-token'));
   });
 
+  it('mapRefresh POSTs to the bridge and reads a refusal as a state', async () => {
+    let seen;
+    const client = new BridgeClient({
+      token: 'secret-token',
+      fetch: fakeFetch((url, init) => {
+        seen = { url, init };
+        return { status: 200, body: { ok: true, started: true, pid: 7 } };
+      }),
+    });
+    const out = await client.mapRefresh();
+    assert.match(seen.url, /\/api\/map\/refresh$/);
+    assert.equal(seen.init.method, 'POST');
+    assert.equal(out.started, true);
+    const refused = new BridgeClient({
+      token: 't',
+      fetch: fakeFetch(() => ({ status: 503, body: { detail: 'bridge down' } })),
+    });
+    assert.deepEqual(await refused.mapRefresh(), { ok: false, reason: 'bridge down' });
+  });
+
   it('sessionPanel GETs the AT bar payload', async () => {
     let seen;
     const client = new BridgeClient({

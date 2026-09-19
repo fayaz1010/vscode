@@ -170,11 +170,51 @@ function taskIndex(atPlan) {
   return index;
 }
 
+// THE RUN, BY TASK. run.json is what the runner leaves beside the map after a real
+// run: one row per task. Folded to id -> outcome so a finding row and a task card can
+// each say what happened to the task without a second fetch.
+const RUN_MARK = {
+  closed: ['✓', 'closed'],
+  closed_unreviewed: ['✓', 'closed, not reviewed'],
+  already_closed: ['✓', 'already closed'],
+  failed: ['✗', 'failed'],
+  skipped_dirty: ['⊘', 'skipped: uncommitted changes'],
+  blocked: ['⊘', 'blocked'],
+  would_run: ['·', 'would run'],
+};
+
+function runIndex(run) {
+  const index = {};
+  for (const r of (run && Array.isArray(run.results) ? run.results : [])) {
+    if (r && r.task) index[r.task] = r;
+  }
+  return index;
+}
+
+function runMark(row) {
+  const [mark, label] = RUN_MARK[(row && row.outcome) || ''] || ['', ''];
+  return { mark, label, why: (row && (row.why || (row.review && row.review.why))) || '' };
+}
+
+function runSummary(run) {
+  if (!run || !Array.isArray(run.results) || run.dry_run) return '';
+  const n = (o) => run.results.filter((r) => r.outcome === o).length;
+  const closed = n('closed') + n('closed_unreviewed') + n('already_closed');
+  const failed = n('failed');
+  const parts = [`run: ${closed} closed`];
+  if (failed) parts.push(`${failed} failed`);
+  if (run.cost_usd != null) parts.push(`$${Number(run.cost_usd).toFixed(2)}`);
+  return parts.join(' · ');
+}
+
 function mapHtml(map, esc) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  const remap = map && map.can_refresh
+    ? '<button data-cmd="map-refresh" class="refresh remap">Re-map</button>'
+    : '';
   if (!map || !map.ok || !map.overview) {
     const why = (map && map.reason) || 'No map for this folder yet. Run repo-dash, or point ~/.anchortrails/map.json at its out/.';
-    return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p></section>`;
+    return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p>${remap}</section>`;
   }
   const meta = map.overview.meta || {};
   const zones = [...(map.overview.zones || [])]
@@ -182,10 +222,20 @@ function mapHtml(map, esc) {
     .sort((a, b) => (b.colour || 0) - (a.colour || 0));
   const index = taskIndex(map.plan);
   const taskFor = (f) => index[`${f.marker}|${f.path}|${f.symbol}`] || index[`${f.marker}|${f.path}|`] || '';
+  const runs = runIndex(map.run);
   const colour = (s) => (s >= 0.7 ? '#e2533f' : s >= 0.5 ? '#c2811f' : s >= 0.3 ? '#8a7b28' : '#6b7484');
   // A zone's `top` rows say `line`; a zone file's findings say `line_start`. Both are
   // the same number under two names, and a link to line 1 is a link to nowhere.
   const lineOf = (f) => Number(f.line_start || f.line || 1);
+  // The task link carries the run's verdict on it: ✓ closed, ✗ failed, ⊘ skipped.
+  // A finding whose task closed is on its way out of the map; until the re-map lands
+  // the mark is how the row says so.
+  const taskLink = (t) => {
+    const st = runMark(runs[t]);
+    const cls = st.mark ? ` m-${(runs[t] && runs[t].outcome) || ''}` : '';
+    const title = st.label ? ` title="${escape(st.label + (st.why ? ': ' + st.why : ''))}"` : '';
+    return `<a href="#" data-cmd="show-task" data-task="${escape(t)}" class="mtask${cls}"${title}>${st.mark ? escape(st.mark) + ' ' : '→ '}${escape(String(t).replace(/^t\./, ''))}</a>`;
+  };
   const finding = (f) => {
     const t = taskFor(f);
     return `<div class="mrow">
@@ -193,7 +243,7 @@ function mapHtml(map, esc) {
       <span class="mmark">${escape(f.marker)}</span>
       <span class="msym">${escape(f.symbol)}</span>
       <a href="#" data-cmd="open-code" data-id="${escape(f.path)}#${lineOf(f)}" class="mcode">${escape(f.path)}:${lineOf(f)} ↗</a>
-      ${t ? `<a href="#" data-cmd="show-task" data-task="${escape(t)}" class="mtask">→ ${escape(String(t).replace(/^t\./, ''))}</a>` : ''}
+      ${t ? taskLink(t) : ''}
     </div>`;
   };
   const zoneBlock = (z) => {
@@ -205,18 +255,24 @@ function mapHtml(map, esc) {
     </details>`;
   };
   const planned = map.plan && Array.isArray(map.plan.tasks) ? map.plan.tasks.length : 0;
+  // While run.sh is re-mapping it emits a partial after every stage; say which.
+  const building = meta.status !== 'complete';
+  const stage = building && meta.stages_total
+    ? `mapping ${Number(meta.stages_done || 0)}/${Number(meta.stages_total)}${meta.stage ? ' · ' + meta.stage : ''}`
+    : (meta.status === 'complete' ? 'complete' : (meta.status || 'building'));
+  const summary = runSummary(map.run);
   // One line, joined with the separator: a multi-line template put newlines between
   // the pieces, which is invisible in a browser and wrong everywhere else.
   const head = `<p class="muted">${[
     escape(String(meta.repo || '').split(/[\\/]/).slice(-2).join('/')),
     `${Number(meta.findings_actionable || 0)} actionable of ${Number(meta.findings_total || 0)}`,
     planned ? `${planned} planned task${planned === 1 ? '' : 's'}` : 'no plan yet',
-    escape(meta.status === 'complete' ? 'complete' : (meta.status || 'building')),
-  ].join(' · ')}</p>`;
+    escape(stage),
+  ].concat(summary ? [escape(summary)] : []).join(' · ')}</p>`;
   const body = zones.length
     ? zones.map(zoneBlock).join('')
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map"><h3>Map</h3>${head}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}"><h3>Map</h3>${head}${remap}${body}</section>`;
 }
 
 const MAP_CSS = `
@@ -228,6 +284,11 @@ const MAP_CSS = `
   .map .mcode { opacity:.75; text-decoration:none; color:inherit; }
   .map .mcode:hover { opacity:1; text-decoration:underline; }
   .map .mtask { padding:1px 7px; border-radius:9px; background:#2d6a5a33; color:#7fd3b9; text-decoration:none; }
+  .map .mtask.m-closed, .map .mtask.m-closed_unreviewed, .map .mtask.m-already_closed { background:#2d6a5a66; color:#9ff0cf; }
+  .map .mtask.m-failed { background:#6a2d2d66; color:#f0a09f; }
+  .map .mtask.m-skipped_dirty, .map .mtask.m-blocked { background:#55555566; color:#cfcfcf; }
+  .map.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }
+  .map .remap { margin:0 0 6px; }
   .map .mzone { margin:6px 0; } .map summary { cursor:pointer; }
   .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
 `;
@@ -347,6 +408,9 @@ function startPlan(client, vscode) {
 }
 
 module.exports = {
+  runIndex,
+  runMark,
+  runSummary,
   VIEW_ID,
   markOf,
   labelOf,

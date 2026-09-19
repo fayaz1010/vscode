@@ -198,6 +198,15 @@ function startHome(client, vscode, extras = {}) {
         paint({ focusTask: msg.task || '' });
         return;
       }
+      if (msg.cmd === 'map-refresh') {
+        // Starts the mapper on the bridge and repaints; the map then shows its own
+        // progress (overview.meta.stage) on the normal poll until it is complete.
+        if (client && typeof client.mapRefresh === 'function') {
+          try { await client.mapRefresh(); } catch { /* offline */ }
+        }
+        paint();
+        return;
+      }
       if (msg.cmd === 'refresh') {
         if (client && typeof client.refreshPlan === 'function') {
           try {
