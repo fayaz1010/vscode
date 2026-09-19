@@ -103,5 +103,11 @@ describe('the map in the editor host', () => {
     assert.equal(mapSig(a), mapSig(same));
     assert.notEqual(mapSig(a), mapSig(fewer));
     assert.notEqual(mapSig(a), mapSig(replanned));
+    const landed = JSON.parse(JSON.stringify(a)); landed.run = { status: 'running', updated_at: 5, results: [{ task: 't', outcome: 'closed' }] };
+    const another = JSON.parse(JSON.stringify(landed)); another.run.updated_at = 6; another.run.results.push({ task: 'u', outcome: 'failed' });
+    assert.notEqual(mapSig(a), mapSig(landed), 'a run landing beside an unchanged map repaints');
+    assert.notEqual(mapSig(landed), mapSig(another), 'and so does each task after it');
+    const started = JSON.parse(JSON.stringify(a)); started.running = true;
+    assert.notEqual(mapSig(a), mapSig(started), 'the bridge starting a run repaints');
   });
 });

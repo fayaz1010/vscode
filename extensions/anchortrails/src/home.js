@@ -144,11 +144,16 @@ async function openCode(vscode, root, rel, line) {
 }
 
 // The map's signature: when this is unchanged, a poll paints nothing.
+// The signature covers the map, the plan AND the run: the runner writes run.json
+// after every task, and a task landing beside an unchanged map must still repaint.
 function mapSig(map) {
   const m = (map && map.overview && map.overview.meta) || {};
   const plan = map && map.plan;
+  const run = map && map.run;
   return [m.generated_at, m.stages_done, m.status, m.findings_total, m.findings_actionable,
-    plan && plan.plan_id, plan && plan.revision].join('/');
+    plan && plan.plan_id, plan && plan.revision,
+    run && run.status, run && (run.updated_at || run.finished_at), run && Array.isArray(run.results) ? run.results.length : 0,
+    map && map.running ? 1 : 0].join('/');
 }
 
 const MAP_POLL_MS = 5000;
