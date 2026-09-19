@@ -127,19 +127,27 @@ function createImpl(vscode, afterWrite) {
 function register(vscode, afterWrite) {
   const lm = vscode && vscode.lm;
   const impl = createImpl(vscode, afterWrite);
+  let registration = null;
+
   if (lm && typeof lm.registerToolDefinition === 'function') {
-    return lm.registerToolDefinition({
+    registration = lm.registerToolDefinition({
       name: BUILTIN_EDIT,
       displayName: 'Edit File',
       description: spec().description,
       inputSchema: SCHEMA,
       tags: ['anchortrails'],
     }, impl);
+  } else if (lm && typeof lm.registerTool === 'function') {
+    registration = lm.registerTool(BUILTIN_EDIT, impl);
   }
-  if (lm && typeof lm.registerTool === 'function') {
-    return lm.registerTool(BUILTIN_EDIT, impl);
-  }
-  return { dispose() {} };
+
+  return {
+    dispose() {
+      if (registration && typeof registration.dispose === 'function') {
+        registration.dispose();
+      }
+    }
+  };
 }
 
 module.exports = {
@@ -151,3 +159,4 @@ module.exports = {
   createImpl,
   register,
 };
+
