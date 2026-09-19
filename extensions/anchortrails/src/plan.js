@@ -362,9 +362,47 @@ function treeItems(rows, vscode) {
 
 function startPlan(client, vscode) {
   let cached = null;
-  const emitter = vscode.window
+  
+  // Properly implement EventEmitter functionality instead of stubbing
+  class SimpleEventEmitter {
+    constructor() {
+      this.listeners = [];
+    }
+    
+    event(listener) {
+      this.listeners.push(listener);
+      return {
+        dispose: () => {
+          const index = this.listeners.indexOf(listener);
+          if (index !== -1) {
+            this.listeners.splice(index, 1);
+          }
+        }
+      };
+    }
+    
+    fire(data) {
+      // Call all registered listeners
+      this.listeners.forEach(listener => {
+        if (typeof listener === 'function') {
+          try {
+            listener(data);
+          } catch (err) {
+            console.error('Error in event listener:', err);
+          }
+        }
+      });
+    }
+    
+    dispose() {
+      // Clear all listeners
+      this.listeners = [];
+    }
+  }
+
+  const emitter = vscode.window && vscode.EventEmitter
     ? new vscode.EventEmitter()
-    : { event: () => {}, fire() {}, dispose() {} };
+    : new SimpleEventEmitter();
 
   const provider = {
     onDidChangeTreeData: emitter.event,
@@ -390,7 +428,11 @@ function startPlan(client, vscode) {
 
   const tree = vscode.window && typeof vscode.window.createTreeView === 'function'
     ? vscode.window.createTreeView(VIEW_ID, { treeDataProvider: provider })
-    : { dispose() {} };
+    : { 
+        dispose() { 
+          /* No tree view to dispose in non-VSCode environment */ 
+        } 
+      };
 
   const cmds = [];
   if (vscode.commands && typeof vscode.commands.registerCommand === 'function') {
