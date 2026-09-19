@@ -115,6 +115,18 @@ function homeHtml(data, err) {
 // map's own repo (what was analysed) and, failing that, the bound folder. Nothing
 // outside that root can be opened: a relative path that escapes it is refused
 // rather than resolved, for the same reason the bridge fences its own open-code.
+// The map says which repo it describes, but a map is data that travels: built on one
+// machine, served by a bridge on another. A `repo` that does not exist here is that
+// machine's path, not ours -- fall through to the bound folder, which is where the
+// same code sits on this one. An absent map, or a map with no repo, does the same.
+function codeRoot(map, vscode, exists) {
+  const fs = require('fs');
+  const there = exists || ((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  const repo = map && typeof map.repo === 'string' ? map.repo : '';
+  if (repo && there(repo)) return repo;
+  return folderPath(vscode) || '';
+}
+
 async function openCode(vscode, root, rel, line) {
   const path = require('path');
   if (!root || !rel) return false;
@@ -175,7 +187,7 @@ function startHome(client, vscode, extras = {}) {
       }
       if (msg.cmd === 'open-code') {
         const [rel, line] = String(msg.id || '').split('#');
-        const root = (lastMap && lastMap.repo) || folderPath(vscode) || '';
+        const root = codeRoot(lastMap, vscode);
         try { await openCode(vscode, root, rel, Number(line) || 1); } catch { /* file may be gone */ }
         return;
       }
@@ -402,6 +414,7 @@ function startHome(client, vscode, extras = {}) {
 
 module.exports = {
   VIEW_ID,
+  codeRoot,
   FALLBACK_SURFACES,
   homeHtml,
   planStrip,

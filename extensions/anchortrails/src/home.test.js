@@ -52,7 +52,7 @@ describe('AT Panel home', () => {
 });
 
 describe('the map in the editor host', () => {
-  const { openCode, mapSig } = require('./home');
+  const { openCode, mapSig, codeRoot } = require('./home');
   const path = require('path');
 
   function fakeVscode(opened) {
@@ -82,6 +82,17 @@ describe('the map in the editor host', () => {
 
   it('refuses when there is no root to resolve against', async () => {
     assert.equal(await openCode(fakeVscode([]), '', 'src/a.ts', 1), false);
+  });
+
+  it('the code root is the map\'s repo only when that path exists on this machine', () => {
+    const here = { workspace: { workspaceFolders: [{ uri: { fsPath: '/r/here' } }] } };
+    const exists = (p) => p === '/r/here' || p === '/r/analysed';
+    assert.equal(codeRoot({ repo: '/r/analysed' }, here, exists), '/r/analysed', 'the analysed repo, when it is here');
+    assert.equal(codeRoot({ repo: '/Users/elsewhere/code-oss' }, here, exists), '/r/here',
+      'a path from the machine that built the map is not a root on this one');
+    assert.equal(codeRoot({}, here, exists), '/r/here', 'no repo in the map: the bound folder');
+    assert.equal(codeRoot(null, here, exists), '/r/here', 'no map at all: the bound folder');
+    assert.equal(codeRoot({ repo: '/Users/elsewhere' }, { workspace: {} }, exists), '', 'nothing to resolve against');
   });
 
   it('the poll signature moves when the map or the plan does, and not otherwise', () => {
