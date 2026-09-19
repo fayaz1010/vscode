@@ -204,12 +204,14 @@ function startPlanBoard(client, vscode) {
 
   const sub = vscode.window && typeof vscode.window.registerWebviewViewProvider === 'function'
     ? vscode.window.registerWebviewViewProvider(VIEW_ID, provider)
-    : { dispose() {} };
+    : { dispose() { /* nothing was registered: nothing to release */ } };
 
   return {
     refresh: paint,
     dispose() {
       if (sub && typeof sub.dispose === 'function') sub.dispose();
+      view = null;
+      tab = 'plan';
     },
   };
 }

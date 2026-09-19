@@ -56,7 +56,11 @@ function startBind(client, vscode, onBound) {
   bind();
   const ws = vscode && vscode.workspace;
   if (!ws || typeof ws.onDidChangeWorkspaceFolders !== 'function') {
-    return { dispose() {} };
+    return {
+      dispose() {
+        /* nothing was registered: nothing to release */
+      },
+    };
   }
   const sub = ws.onDidChangeWorkspaceFolders(bind);
   return {
@@ -70,7 +74,7 @@ module.exports = {
   DEST_REPO_NAMES,
   folderPath,
   folderPaths,
-  sessionFromPath,
   sessionId,
+  sessionFromPath,
   startBind,
 };

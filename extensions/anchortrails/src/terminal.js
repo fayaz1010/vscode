@@ -137,7 +137,7 @@ function register(vscode) {
   if (lm && typeof lm.registerTool === 'function') {
     return lm.registerTool(BUILTIN_TERMINAL, impl);
   }
-  return { dispose() {} };
+  return { dispose() { /* nothing was registered: nothing to release */ } };
 }
 
 function startTerminal(vscode) {
@@ -156,3 +156,4 @@ module.exports = {
   startTerminal,
   showTranscript,
 };
+

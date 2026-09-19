@@ -89,6 +89,9 @@ function activate(context) {
   return { client };
 }
 
-function deactivate() {}
+function deactivate() {
+  /* Extension shutdown is handled by VS Code disposing of subscriptions. */
+}
 
 module.exports = { activate, deactivate };
+

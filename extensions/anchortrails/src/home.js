@@ -391,7 +391,7 @@ function startHome(client, vscode, extras = {}) {
 
   const sub = vscode.window && typeof vscode.window.registerWebviewViewProvider === 'function'
     ? vscode.window.registerWebviewViewProvider(VIEW_ID, provider)
-    : { dispose() {} };
+    : { dispose() { /* nothing was registered: nothing to release */ } };
 
   const cmds = [];
   if (vscode.commands && typeof vscode.commands.registerCommand === 'function') {
