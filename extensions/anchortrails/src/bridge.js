@@ -131,6 +131,14 @@ class BridgeClient {
     return data;
   }
 
+  // THE ONE CALL THAT WRITES CODE: run the plan beside the map through repo-dash's
+  // runner. Only /run in chat reaches this.
+  async mapApply() {
+    const { r, data } = await this._json('POST', '/api/map/apply', {});
+    if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
+    return data;
+  }
+
   async mapZone(slug) {
     const { r, data } = await this._json('GET', `/api/map/zones/${encodeURIComponent(slug)}`);
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };

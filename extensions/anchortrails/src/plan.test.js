@@ -159,8 +159,14 @@ describe('the map beside the stack', () => {
     const html = mapHtml({ ...building, can_refresh: true }, esc);
     assert.match(html, /mapping 3\/6 · Tier A: absence/);
     assert.match(html, /<section class="map building">/);
-    assert.match(html, /data-cmd="map-refresh"/);
-    assert.doesNotMatch(mapHtml(MAP, esc), /map-refresh/, 'no mapper declared: no button');
-    assert.match(mapHtml({ ok: false, reason: 'no map', can_refresh: true }, esc), /map-refresh/, 'no map yet, but one can be made: the button is the way to make it');
+    assert.match(html, /data-cmd="chat" data-id="\/map"/, 'Re-map puts /map into the chat');
+    assert.doesNotMatch(mapHtml(MAP, esc), /data-id="\/map"/, 'no mapper declared: no button');
+    assert.match(mapHtml({ ok: false, reason: 'no map', can_refresh: true }, esc), /data-id="\/map"/, 'no map yet, but one can be made: the button is the way to make it');
+    const runnable = mapHtml({ ...MAP, can_apply: true }, esc);
+    assert.match(runnable, /data-cmd="chat" data-id="\/run" class="refresh runplan">Run plan</, 'Run plan puts /run into the chat');
+    const live = mapHtml({ ...MAP, can_apply: true, running: true }, esc);
+    assert.match(live, /data-id="\/run status"[^>]*>Running… \(status\)</, 'while a run goes, the button reads the run back');
+    assert.match(live, /run in progress/);
+    assert.doesNotMatch(mapHtml(MAP, esc), /runplan/, 'no plan or no mapper: no Run');
   });
 });
