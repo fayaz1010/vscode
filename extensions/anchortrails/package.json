@@ -1,7 +1,7 @@
 {
   "name": "anchortrails",
   "displayName": "AnchorTrails",
-  "description": "AT MUWT composer — talks to the local AnchorTrails node. No MCP dump.",
+  "description": "AT MUWT composer \u2014 talks to the local AnchorTrails node. No MCP dump.",
   "publisher": "anchortrails",
   "version": "0.0.1",
   "icon": "media/icon.png",
@@ -38,7 +38,7 @@
         "id": "anchortrails.chat",
         "name": "at",
         "fullName": "AnchorTrails",
-        "description": "MUWT composer — assign owns the model. Keys via util-ai / vault on the node. Planning summons OzFactory DESIGN→PLAN when assigned.",
+        "description": "MUWT composer \u2014 assign owns the model. Keys via util-ai / vault on the node. Planning summons OzFactory DESIGN\u2192PLAN when assigned.",
         "isDefault": true,
         "isSticky": true,
         "modes": [
@@ -54,6 +54,14 @@
           {
             "name": "refresh",
             "description": "Rescore the plan from what is done and planned against the goal."
+          },
+          {
+            "name": "map",
+            "description": "Re-run the code map (repo-dash) for the bound folder; the AT Panel shows each stage."
+          },
+          {
+            "name": "run",
+            "description": "Run the plan beside the map: dispatch, verify, review, close. Add status to read the run back."
           }
         ]
       }
@@ -220,7 +228,9 @@
       "workbench.editor.limit.enabled": false,
       "workbench.welcomePage.walkthroughs.hideOnStartup": true,
       "extensions.ignoreRecommendations": true,
-      "github.copilot.enable": { "*": false },
+      "github.copilot.enable": {
+        "*": false
+      },
       "chat.agentHost.codexAgent.enabled": false,
       "chat.editor.codex.preferAgentHost": false,
       "window.title": "AnchorTrails${separator}${activeEditorShort}${separator}${rootName}",

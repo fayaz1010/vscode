@@ -209,12 +209,19 @@ function runSummary(run) {
 
 function mapHtml(map, esc) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  // The buttons put a command into the chat and send it; the chat does the work.
+  // Every action the panel offers is a sentence the person could have typed.
+  const running = Boolean(map && map.running);
   const remap = map && map.can_refresh
-    ? '<button data-cmd="map-refresh" class="refresh remap">Re-map</button>'
+    ? '<button data-cmd="chat" data-id="/map" class="refresh remap">Re-map</button>'
     : '';
+  const runBtn = map && map.can_apply
+    ? `<button data-cmd="chat" data-id="${running ? '/run status' : '/run'}" class="refresh runplan${running ? ' running' : ''}">${running ? 'Running… (status)' : 'Run plan'}</button>`
+    : '';
+  const actions = remap || runBtn ? `<div class="mactions">${remap}${runBtn}</div>` : '';
   if (!map || !map.ok || !map.overview) {
     const why = (map && map.reason) || 'No map for this folder yet. Run repo-dash, or point ~/.anchortrails/map.json at its out/.';
-    return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p>${remap}</section>`;
+    return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p>${actions}</section>`;
   }
   const meta = map.overview.meta || {};
   const zones = [...(map.overview.zones || [])]
@@ -260,7 +267,7 @@ function mapHtml(map, esc) {
   const stage = building && meta.stages_total
     ? `mapping ${Number(meta.stages_done || 0)}/${Number(meta.stages_total)}${meta.stage ? ' · ' + meta.stage : ''}`
     : (meta.status === 'complete' ? 'complete' : (meta.status || 'building'));
-  const summary = runSummary(map.run);
+  const summary = runSummary(map.run) + (running ? (runSummary(map.run) ? ' · ' : '') + 'run in progress' : '');
   // One line, joined with the separator: a multi-line template put newlines between
   // the pieces, which is invisible in a browser and wrong everywhere else.
   const head = `<p class="muted">${[
@@ -272,7 +279,7 @@ function mapHtml(map, esc) {
   const body = zones.length
     ? zones.map(zoneBlock).join('')
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map${building ? ' building' : ''}"><h3>Map</h3>${head}${remap}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}"><h3>Map</h3>${head}${actions}${body}</section>`;
 }
 
 const MAP_CSS = `
@@ -288,7 +295,8 @@ const MAP_CSS = `
   .map .mtask.m-failed { background:#6a2d2d66; color:#f0a09f; }
   .map .mtask.m-skipped_dirty, .map .mtask.m-blocked { background:#55555566; color:#cfcfcf; }
   .map.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }
-  .map .remap { margin:0 0 6px; }
+  .map .mactions { display:flex; gap:6px; } .map .remap, .map .runplan { margin:0 0 6px; }
+  .map .runplan.running { opacity:.7; }
   .map .mzone { margin:6px 0; } .map summary { cursor:pointer; }
   .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
 `;

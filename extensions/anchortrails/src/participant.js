@@ -299,9 +299,28 @@ async function handleTurn({
   const tag = planTag(request);
   const attachments = collectAttachments(request);
   if (response && typeof response.progress === 'function') {
-    response.progress(tag && tag.kind === 'refresh' ? 'plan refresh…' : 'assign…');
+    response.progress(tag && tag.kind === 'refresh' ? 'plan refresh…'
+      : tag && tag.kind === 'map' ? 're-map…'
+        : tag && tag.kind === 'run' ? 'run…' : 'assign…');
   }
   try {
+    if (tag && (tag.kind === 'map' || tag.kind === 'run')) {
+      // The map and the run: the bridge does the work, the chat reports it, the panel
+      // shows it. No model turn -- the person asked for an action, not an answer.
+      const { mapActionMarkdown } = require('./slash');
+      let out;
+      let kind = tag.kind;
+      if (tag.kind === 'map') {
+        out = client && typeof client.mapRefresh === 'function' ? await client.mapRefresh() : { ok: false, reason: 'no bridge' };
+      } else if (/^status\b/i.test(tag.rest)) {
+        kind = 'status';
+        out = { map: client && typeof client.map === 'function' ? await client.map() : null };
+      } else {
+        out = client && typeof client.mapApply === 'function' ? await client.mapApply() : { ok: false, reason: 'no bridge' };
+      }
+      response.markdown(mapActionMarkdown(kind, out));
+      return { metadata: { slash: kind, session_id: sessionId } };
+    }
     if (tag && !tag.rest) {
       let planOut = { plan: {} };
       try {

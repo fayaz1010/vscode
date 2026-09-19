@@ -120,6 +120,17 @@ describe('BridgeClient', () => {
     assert.deepEqual(await refused.mapRefresh(), { ok: false, reason: 'bridge down' });
   });
 
+  it('mapApply POSTs the one call that writes code', async () => {
+    let seen;
+    const client = new BridgeClient({
+      token: 't',
+      fetch: fakeFetch((url, init) => { seen = { url, init }; return { status: 200, body: { ok: true, started: true } }; }),
+    });
+    assert.equal((await client.mapApply()).started, true);
+    assert.match(seen.url, /\/api\/map\/apply$/);
+    assert.equal(seen.init.method, 'POST');
+  });
+
   it('sessionPanel GETs the AT bar payload', async () => {
     let seen;
     const client = new BridgeClient({

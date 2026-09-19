@@ -198,13 +198,10 @@ function startHome(client, vscode, extras = {}) {
         paint({ focusTask: msg.task || '' });
         return;
       }
-      if (msg.cmd === 'map-refresh') {
-        // Starts the mapper on the bridge and repaints; the map then shows its own
-        // progress (overview.meta.stage) on the normal poll until it is complete.
-        if (client && typeof client.mapRefresh === 'function') {
-          try { await client.mapRefresh(); } catch { /* offline */ }
-        }
-        paint();
+      if (msg.cmd === 'chat') {
+        // A panel button is a sentence: it goes into @at and is sent. The chat does
+        // the work (/map, /run) and the panel shows the result on its poll.
+        try { await openChat(vscode, { query: String(msg.id || ''), send: true }); } catch { /* chat optional */ }
         return;
       }
       if (msg.cmd === 'refresh') {

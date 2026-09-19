@@ -22,6 +22,10 @@ describe('dest /plan tag', () => {
       kind: 'refresh', rest: 'after edits',
     });
     assert.equal(planTag({ prompt: 'implement checkout' }), null);
+    assert.deepEqual(planTag({ prompt: '/map' }), { kind: 'map', rest: '' });
+    assert.deepEqual(planTag({ command: { name: 'run' }, prompt: 'status' }), { kind: 'run', rest: 'status' });
+    assert.deepEqual(planTag({ prompt: '/run' }), { kind: 'run', rest: '' });
+    assert.equal(planTag({ prompt: 'run the tests' }), null, 'a sentence with run in it is not /run');
   });
 
   it('prints the goal and steps without leftover MUWT lock language by default', () => {
@@ -39,5 +43,24 @@ describe('dest /plan tag', () => {
     assert.match(md, /\*\*Stack\*\*/);
     assert.match(md, /Languages:/);
     assert.ok(!md.includes('desktop_vault_get'));
+  });
+});
+
+describe('what the chat says for /map and /run', () => {
+  const { mapActionMarkdown } = require('./slash');
+  it('reports a start, and a refusal in the bridge\'s own words', () => {
+    assert.match(mapActionMarkdown('map', { ok: true, started: true }), /Re-map started/);
+    assert.match(mapActionMarkdown('map', { ok: false, reason: 'a re-map is already running (pid 7)' }), /already running \(pid 7\)/);
+    assert.match(mapActionMarkdown('run', { ok: true, started: true }), /Run started/);
+    assert.match(mapActionMarkdown('run', { ok: false, reason: 'no plan beside the map; plan first' }), /plan first/);
+  });
+  it('/run status lists every task with the run\'s verdict', () => {
+    const md = mapActionMarkdown('status', { map: { run: { status: 'running', cost_usd: 0.02, results: [
+      { task: 't.a', outcome: 'closed' }, { task: 't.b', outcome: 'failed', why: 'review rejected: gamed it' },
+    ] } } });
+    assert.match(md, /\*\*Running\*\* · run: 1 closed · 1 failed · \$0\.02/);
+    assert.match(md, /✓ a — closed/);
+    assert.match(md, /✗ b — failed: review rejected: gamed it/);
+    assert.match(mapActionMarkdown('status', { map: { run: null } }), /No run yet/);
   });
 });
