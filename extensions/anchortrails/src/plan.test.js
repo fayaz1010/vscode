@@ -95,6 +95,9 @@ describe('the map beside the stack', () => {
         top: [
           { marker: 'never_referenced', symbol: 'sendPaymentReminder', path: 'src/services/email.ts', line_start: 115, severity: 0.6 },
           { marker: 'config_orphan', symbol: 'GEMINI_KEY', path: 'src/config/gemini.ts', line_start: 3, severity: 0.51 },
+          // compile.py's zone `top` rows name the line `line`, not `line_start`; a real map on
+          // HomePC linked every finding to :1 because only the second spelling was read.
+          { marker: 'stub_body', symbol: 'dispose', path: 'src/services/socket.ts', line: 142, severity: 0.7 },
         ],
       }],
     },
@@ -114,6 +117,7 @@ describe('the map beside the stack', () => {
     const html = mapHtml(MAP, esc);
     assert.match(html, /data-cmd="open-code" data-id="src\/services\/email\.ts#115"/);
     assert.match(html, /data-cmd="open-code" data-id="src\/config\/gemini\.ts#3"/);
+    assert.match(html, /data-cmd="open-code" data-id="src\/services\/socket\.ts#142"/, 'a `line` row links to its line, not :1');
   });
 
   it('a finding the plan owns links to its task; one it does not has no task link', () => {

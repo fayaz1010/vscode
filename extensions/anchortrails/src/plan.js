@@ -183,13 +183,16 @@ function mapHtml(map, esc) {
   const index = taskIndex(map.plan);
   const taskFor = (f) => index[`${f.marker}|${f.path}|${f.symbol}`] || index[`${f.marker}|${f.path}|`] || '';
   const colour = (s) => (s >= 0.7 ? '#e2533f' : s >= 0.5 ? '#c2811f' : s >= 0.3 ? '#8a7b28' : '#6b7484');
+  // A zone's `top` rows say `line`; a zone file's findings say `line_start`. Both are
+  // the same number under two names, and a link to line 1 is a link to nowhere.
+  const lineOf = (f) => Number(f.line_start || f.line || 1);
   const finding = (f) => {
     const t = taskFor(f);
     return `<div class="mrow">
       <span class="msev" style="color:${colour(f.severity)}">${Number(f.severity || 0).toFixed(2)}</span>
       <span class="mmark">${escape(f.marker)}</span>
       <span class="msym">${escape(f.symbol)}</span>
-      <a href="#" data-cmd="open-code" data-id="${escape(f.path)}#${Number(f.line_start || 1)}" class="mcode">${escape(f.path)}:${Number(f.line_start || 1)} ↗</a>
+      <a href="#" data-cmd="open-code" data-id="${escape(f.path)}#${lineOf(f)}" class="mcode">${escape(f.path)}:${lineOf(f)} ↗</a>
       ${t ? `<a href="#" data-cmd="show-task" data-task="${escape(t)}" class="mtask">→ ${escape(String(t).replace(/^t\./, ''))}</a>` : ''}
     </div>`;
   };
