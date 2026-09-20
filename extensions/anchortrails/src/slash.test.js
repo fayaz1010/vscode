@@ -27,6 +27,8 @@ describe('dest /plan tag', () => {
     assert.deepEqual(planTag({ command: 'map', prompt: 'plan finish it' }), { kind: 'map', rest: 'plan finish it' });
     assert.deepEqual(planTag({ command: 'plan', prompt: '' }), { kind: 'ask', rest: '' });
     assert.deepEqual(planTag({ command: 'refresh', prompt: '' }), { kind: 'refresh', rest: '' });
+    assert.deepEqual(planTag({ prompt: '@at /map plan finish it' }), { kind: 'map', rest: 'plan finish it' }, 'a leading @at mention is not part of the sentence');
+    assert.deepEqual(planTag({ prompt: '@at @at /run' }), { kind: 'run', rest: '' });
     assert.deepEqual(planTag({ command: { name: 'run' }, prompt: 'status' }), { kind: 'run', rest: 'status' });
     assert.deepEqual(planTag({ prompt: '/run' }), { kind: 'run', rest: '' });
     assert.equal(planTag({ prompt: 'run the tests' }), null, 'a sentence with run in it is not /run');

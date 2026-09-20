@@ -16,7 +16,9 @@ function commandName(request) {
 
 function planTag(request) {
   const cmd = commandName(request);
-  const raw = String((request && request.prompt) || '');
+  // A prompt that still carries the participant mention -- "@at /map" typed into a
+  // box that already had @at, or relayed from another IDE -- is the same sentence.
+  const raw = String((request && request.prompt) || '').replace(/^(\s*@at\b\s*)+/i, '');
   // THE MAP AND THE RUN ARE CHAT COMMANDS. /map re-runs the mapper; /run runs the
   // plan beside the map; /run status reads the run back. The panel's buttons put
   // exactly these into the chat -- every action is something the person said.
