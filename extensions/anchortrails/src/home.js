@@ -305,7 +305,9 @@ function startHome(client, vscode, extras = {}) {
 
   async function paint(extra = {}) {
     if (!view && !editor) return;
-    const fallback = overlay({ surface: 'auto', surfaces: FALLBACK_SURFACES, wide: Boolean(editor) });
+    // The first paint goes up before the bridge answers. It carries the last map
+    // it saw, or says it is asking -- never "no map", which is a different fact.
+    const fallback = overlay({ surface: 'auto', surfaces: FALLBACK_SURFACES, wide: Boolean(editor), map: lastMap || { loading: true } });
     write(view, homeHtml(fallback));
     write(editor, shellHtml(fallback, tab));
     try {
@@ -333,8 +335,8 @@ function startHome(client, vscode, extras = {}) {
       write(view, homeHtml(next));
       write(editor, shellHtml(next, tab));
     } catch (err) {
-      write(view, homeHtml(fallback, err));
-      write(editor, shellHtml(fallback, tab, err));
+      write(view, homeHtml({ ...fallback, map: lastMap }, err));
+      write(editor, shellHtml({ ...fallback, map: lastMap }, tab, err));
       if (retries < 3) {
         retries += 1;
         setTimeout(paint, 2000);

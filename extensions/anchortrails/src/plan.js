@@ -254,6 +254,9 @@ function mapHtml(map, esc) {
       ? `<p class="muted mobjective">objective: ${escape(objective)}</p>`
       : '<p class="muted mobjective">no objective yet — the plan comes from one: Plan…, or <code>/map plan &lt;objective&gt;</code> in @at</p>')
     : '';
+  if (map && map.loading) {
+    return '<section class="map"><h3>Map</h3><p class="muted">Asking the AT node for the map of this folder…</p></section>';
+  }
   if (!map || !map.ok || !map.overview) {
     const why = (map && map.reason) || 'No map for this folder yet. Run repo-dash, or point ~/.anchortrails/map.json at its out/.';
     return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p>${actions}</section>`;

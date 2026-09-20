@@ -41,6 +41,7 @@ describe('Dashboard tab', () => {
     assert.match(html, /data-id="\/map"/);
     assert.doesNotMatch(html, /class="tiles"/);
     assert.match(dashboardHtml(null, esc), /No map for this folder yet/);
+    assert.match(dashboardHtml({ loading: true }, esc), /Asking the AT node/, 'the first paint is a question, not "no map"');
   });
 
   it('sums the envelope: chips, numbers, progress, tasks, markers, zones', () => {

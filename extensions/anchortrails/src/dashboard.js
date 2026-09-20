@@ -87,6 +87,9 @@ function dashboardHtml(map, esc, focusTask) {
   const cur = (map && map.currency) || {};
   const objective = map && map.objective ? String(map.objective) : '';
   const where = (map && map.project && map.project.root) || (map && map.repo) || '';
+  if (map && map.loading) {
+    return '<section class="dash"><h3>Dashboard</h3><p class="muted">Asking the AT node for the map of this folder…</p></section>';
+  }
   if (!map || !map.ok || !map.overview) {
     const why = (map && map.reason) || 'No map for this folder yet. Map it, then plan from an objective, then run.';
     return `<section class="dash"><h3>Dashboard</h3>${where ? `<p class="muted">${escape(where)}</p>` : ''}<p class="muted">${escape(why)}</p>${actions}</section>`;
