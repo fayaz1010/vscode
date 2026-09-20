@@ -301,10 +301,10 @@ async function handleTurn({
   if (response && typeof response.progress === 'function') {
     response.progress(tag && tag.kind === 'refresh' ? 'plan refresh…'
       : tag && tag.kind === 'map' ? 're-map…'
-        : tag && tag.kind === 'run' ? 'run…' : 'assign…');
+        : tag && tag.kind === 'run' ? 'run…' : tag && tag.kind === 'ship' ? 'ship…' : 'assign…');
   }
   try {
-    if (tag && (tag.kind === 'map' || tag.kind === 'run')) {
+    if (tag && (tag.kind === 'map' || tag.kind === 'run' || tag.kind === 'ship')) {
       // The map and the run: the bridge does the work, the chat reports it, the panel
       // shows it. No model turn -- the person asked for an action, not an answer.
       const { mapActionMarkdown, mapArgs } = require('./slash');
@@ -323,6 +323,10 @@ async function handleTurn({
             ? await client.mapRefresh({ repo, subtree: args.subtree, force: args.force })
             : { ok: false, reason: 'no bridge' };
         }
+      } else if (tag.kind === 'ship') {
+        out = client && typeof client.mapShip === 'function'
+          ? await client.mapShip({ repo, prod: /^prod(uction)?\b/i.test(tag.rest) })
+          : { ok: false, reason: 'no bridge' };
       } else if (/^status\b/i.test(tag.rest)) {
         kind = 'status';
         out = { map: client && typeof client.map === 'function' ? await client.map({ repo }) : null };

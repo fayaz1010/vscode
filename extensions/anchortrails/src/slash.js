@@ -28,6 +28,11 @@ function planTag(request) {
   if (cmd === 'run' || /^\/run\b/i.test(raw)) {
     return { kind: 'run', rest: raw.replace(/^\/run\b/i, '').trim() };
   }
+  // /ship: commit, build, push and preview-deploy what the last run closed; `/ship
+  // prod` promotes to production -- a deliberate word, never the default.
+  if (cmd === 'ship' || /^\/ship\b/i.test(raw)) {
+    return { kind: 'ship', rest: raw.replace(/^\/ship\b/i, '').trim() };
+  }
   if (
     cmd === 'refresh'
     || /^\/plan\s+refresh\b/i.test(raw)
@@ -74,9 +79,15 @@ function mapActionMarkdown(kind, out) {
     const head = `**${run.status === 'running' ? 'Running' : 'Run'}** · ${runSummary(run) || `${run.results.length} task(s)`}`;
     return [head, ...lines].join('\n');
   }
+  if (kind === 'ship') {
+    if (o.needs_run) return `${o.reason || 'Nothing has run yet.'}`;
+    return o.ok
+      ? `Shipping${o.prod ? ' to production' : ''}: commit what the run closed, build, push, ${o.prod ? 'deploy' : 'preview-deploy'}. The Dashboard shows each step and the deploy URL when it lands.`
+      : `Ship not started: ${o.reason || 'no bridge'}`;
+  }
   if (o.needs_plan) return `${o.reason || 'No plan yet.'}`;
   return o.ok
-    ? 'Run started. If the map is behind the tree it re-maps and re-plans first, from the stored objective. Each task shows on its finding in the AT Panel as it closes or fails; `/run status` for the totals.'
+    ? `Run started. If the map is behind the tree it re-maps and re-plans first, from the stored objective. Each task shows on its finding in the AT Panel as it closes or fails${o.ships_after ? ', and what closes is committed, built, pushed and preview-deployed when the run ends' : ''}; \`/run status\` for the totals.`
     : `Run not started: ${o.reason || 'no bridge'}`;
 }
 

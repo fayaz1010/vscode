@@ -155,6 +155,12 @@ class BridgeClient {
 
   // THE ONE CALL THAT WRITES CODE: run the plan beside the map through repo-dash's
   // runner. Only /run in chat reaches this.
+  async mapShip({ repo, prod } = {}) {
+    const { r, data } = await this._json('POST', '/api/map/ship', { repo: repo || '', prod: Boolean(prod) });
+    if (!r.ok) throw new BridgeError(flat(data.error || data.detail) || r.statusText, { status: r.status, body: data });
+    return data;
+  }
+
   async mapApply({ repo } = {}) {
     const { r, data } = await this._json('POST', '/api/map/apply', repo ? { repo } : {});
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };

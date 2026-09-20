@@ -154,8 +154,12 @@ function mapSig(map) {
   return [m.generated_at, m.stages_done, m.status, m.findings_total, m.findings_actionable,
     plan && plan.plan_id, plan && plan.revision,
     run && run.status, run && (run.updated_at || run.finished_at), run && Array.isArray(run.results) ? run.results.length : 0,
-    map && map.running ? 1 : 0, map && map.mapping ? 1 : 0, map && map.planning ? 1 : 0,
-    cur.state, cur.tree_head, map && map.objective].join('/');
+    map && map.running ? 1 : 0, map && map.mapping ? 1 : 0, map && map.planning ? 1 : 0, map && map.shipping ? 1 : 0,
+    cur.state, cur.tree_head, map && map.objective,
+    // live progress and the log tail move the signature too, so a running job repaints
+    map && map.progress ? `${map.progress.task}/${map.progress.attempt}/${map.progress.phase}/${map.progress.since}` : '',
+    map && map.log_tail ? `${map.log_tail.job}/${(map.log_tail.lines || []).length}/${map.log_tail.updated_at}` : '',
+    map && map.ship ? `${map.ship.status}/${map.ship.finished_at || ''}` : ''].join('/');
 }
 
 const MAP_POLL_MS = 5000;

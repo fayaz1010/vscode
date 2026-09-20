@@ -11,7 +11,7 @@
  *
  * Absent is a state: a folder with no map yet shows the buttons that make one.
  */
-const { runIndex, runMark, mapActions } = require('./plan');
+const { runIndex, runMark, mapActions, shipLine, progressHtml } = require('./plan');
 const { graphSvg } = require('./map_graph');
 
 // "symbol (marker, line N)" -- the planner's deliverable line. The line is what makes
@@ -121,6 +121,8 @@ function dashboardHtml(map, esc, focusTask) {
   else chips.push('<span class="chip warn">no plan</span>');
   if (map.running) chips.push('<span class="chip busy">run in progress</span>');
   else if (tot.results) chips.push(`<span class="chip${tot.failed ? ' warn' : ' ok'}">last run ${escape(tot.status || 'complete')}</span>`);
+  if (map.shipping) chips.push('<span class="chip busy">shipping…</span>');
+  else if (map.ship && map.ship.status) chips.push(`<span class="chip${map.ship.status === 'shipped' ? ' ok' : ' warn'}">${escape(map.ship.status)}${map.ship.deploy && map.ship.deploy.url ? ' · ' + (map.ship.deploy.prod ? 'prod' : 'preview') : ''}</span>`);
 
   const objectiveLine = objective
     ? `<p class="dobjective"><span class="muted">objective</span> ${escape(objective)}</p>`
@@ -217,6 +219,8 @@ function dashboardHtml(map, esc, focusTask) {
     <p class="muted">${escape(String(meta.repo || where || '').split(/[\\/]/).slice(-2).join('/'))}</p>
     <div class="chips">${chips.join('')}</div>
     ${objectiveLine}
+    ${shipLine(map, escape)}
+    ${progressHtml(map, escape)}
     ${actions}
     ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4 })}
     ${tiles}

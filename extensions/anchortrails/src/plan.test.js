@@ -245,3 +245,28 @@ describe('the map is of the repository: grey where unread, green where clean', (
     assert.equal(greyZonesHtml([], esc), '');
   });
 });
+
+describe('what is happening now, and what the last ship did', () => {
+  const { progressHtml, shipLine, mapActions } = require('./plan');
+  const esc = (v) => String(v ?? '');
+  it('shows the task, attempt, phase and the live log tail', () => {
+    const map = { running: true, progress: { task: 't.src-a.ts', attempt: 2, phase: 'acceptance: typecheck and re-map', model: 'x-ai/grok-4.6', since: Math.floor(Date.now() / 1000) - 14 },
+      log_tail: { job: 'apply', alive: true, lines: ['  t.src-a.ts  attempt 1/3 …', '  t.src-a.ts  attempt 2/3 …'] } };
+    const html = progressHtml(map, esc);
+    assert.match(html, /now: <b>src-a\.ts<\/b> · attempt 2 · acceptance: typecheck and re-map <span class="muted">\[x-ai\/grok-4\.6\]<\/span> <span class="muted">· 1[45]s<\/span>/);
+    assert.match(html, /<details class="mlog" open><summary>apply log · last 2 lines · live<\/summary><pre>/);
+    assert.equal(progressHtml({ running: false }, esc), '', 'idle: nothing to say');
+    assert.match(progressHtml({ mapping: true, log_tail: { job: 'map', alive: true, lines: ['x'] } }, esc), /now: map job running/);
+  });
+  it('the ship line and the Ship button', () => {
+    assert.equal(shipLine({}, esc), '');
+    assert.match(shipLine({ shipping: true }, esc), /shipping… commit, build, push, deploy/);
+    const ok = shipLine({ ship: { status: 'shipped', commit: { sha: 'abc1234' }, build: { ok: true }, push: { ok: true, branch: 'main' }, deploy: { ok: true, url: 'https://p.vercel.app' } } }, esc);
+    assert.match(ok, /class="muted mship ok">ship: shipped · committed abc1234 · built · pushed main · <a href="https:\/\/p\.vercel\.app">preview https:\/\/p\.vercel\.app<\/a>/);
+    const bad = shipLine({ ship: { status: 'build failed', commit: { sha: 'abc1234' }, build: { ok: false, tail: 'x' } } }, esc);
+    assert.match(bad, /class="muted mship warn">ship: build failed · committed abc1234 · build failed/);
+    assert.match(mapActions({ can_ship: true }, esc), /data-cmd="chat" data-id="\/ship" class="refresh shipbtn">Ship</);
+    assert.doesNotMatch(mapActions({ can_ship: true, running: true }, esc), /shipbtn/, 'a run in progress ships itself when it ends');
+    assert.match(mapActions({ can_ship: true, shipping: true }, esc), /Shipping…/);
+  });
+});

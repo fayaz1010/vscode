@@ -231,8 +231,50 @@ function mapActions(map, esc) {
   const runBtn = map && map.can_apply
     ? `<button data-cmd="chat" data-id="${running ? '/run status' : '/run'}" class="refresh runplan${running ? ' running' : ''}">${running ? 'Running… (status)' : 'Run plan'}</button>`
     : '';
-  const actions = remap || planBtn || runBtn ? `<div class="mactions">${remap}${planBtn}${runBtn}</div>` : '';
+  const shipping = Boolean(map && map.shipping);
+  const shipBtn = map && map.can_ship && !running
+    ? `<button data-cmd="chat" data-id="${shipping ? '/run status' : '/ship'}" class="refresh shipbtn${shipping ? ' running' : ''}"${shipping ? ' disabled' : ''}>${shipping ? 'Shipping…' : 'Ship'}</button>`
+    : '';
+  const actions = remap || planBtn || runBtn || shipBtn ? `<div class="mactions">${remap}${planBtn}${runBtn}${shipBtn}</div>` : '';
   return actions;
+}
+
+// WHAT IS HAPPENING NOW. The runner's progress note (task · attempt · phase · for
+// how long) and the live job's last log lines, so a four-minute typecheck reads as
+// work in progress and not as a hang.
+function progressHtml(map, esc) {
+  const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  const p = map && map.progress;
+  const tail = map && map.log_tail;
+  const busy = map && (map.running || map.mapping || map.planning || map.shipping);
+  if (!p && !(tail && tail.alive)) return '';
+  const now = Math.floor(Date.now() / 1000);
+  const line = p
+    ? `<p class="mnow">now: <b>${escape(String(p.task || '').replace(/^t\./, ''))}</b> · attempt ${Number(p.attempt || 0)} · ${escape(p.phase || '')}${p.model ? ` <span class="muted">[${escape(p.model)}]</span>` : ''}${p.since ? ` <span class="muted">· ${Math.max(0, now - Number(p.since))}s</span>` : ''}</p>`
+    : (busy ? `<p class="mnow">now: ${escape(tail.job)} job running</p>` : '');
+  const log = tail && Array.isArray(tail.lines) && tail.lines.length
+    ? `<details class="mlog"${busy ? ' open' : ''}><summary>${escape(tail.job)} log · last ${tail.lines.length} lines${tail.alive ? ' · live' : ''}</summary><pre>${escape(tail.lines.join('\n'))}</pre></details>`
+    : '';
+  return line + log;
+}
+
+// What the last ship did, in one line: the commit, the build, the push, the deploy.
+function shipLine(map, esc) {
+  const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  const sh = map && map.ship;
+  if (map && map.shipping) return '<p class="muted mship">shipping… commit, build, push, deploy</p>';
+  if (!sh) return '';
+  const parts = [];
+  if (sh.commit && sh.commit.sha) parts.push(`committed ${escape(sh.commit.sha)}`);
+  else if (sh.commit && sh.commit.skipped) parts.push('nothing new to commit');
+  if (sh.build && sh.build.ok === false) parts.push('build failed');
+  else if (sh.build && !sh.build.skipped) parts.push('built');
+  if (sh.push && sh.push.ok === false) parts.push('push failed');
+  else if (sh.push && !sh.push.skipped) parts.push(`pushed ${escape(sh.push.branch || '')}`);
+  if (sh.deploy && sh.deploy.url) parts.push(`<a href="${escape(sh.deploy.url)}">${sh.deploy.prod ? 'deployed' : 'preview'} ${escape(sh.deploy.url)}</a>`);
+  else if (sh.deploy && sh.deploy.ok === false) parts.push('deploy failed');
+  const cls = sh.status === 'shipped' ? 'ok' : 'warn';
+  return `<p class="muted mship ${cls}">ship: ${escape(sh.status || '')}${parts.length ? ' · ' + parts.join(' · ') : ''}</p>`;
 }
 
 // THE UNREAD PART OF THE REPOSITORY. Grey zones grouped under their top-level
@@ -364,7 +406,7 @@ function mapHtml(map, esc) {
   const body = zones.length || cleanRows || greyBlock
     ? graph + zones.map(zoneBlock).join('') + cleanRows + greyBlock
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${actions}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${shipLine(map, escape)}${progressHtml(map, escape)}${actions}${body}</section>`;
 }
 
 const MAP_CSS = `
@@ -382,7 +424,10 @@ const MAP_CSS = `
   .map.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }
   .map .mactions { display:flex; gap:6px; flex-wrap:wrap; } .map .remap, .map .runplan, .map .planbtn { margin:0 0 6px; }
   .map .runplan.running, .map .remap.running, .map .planbtn.running { opacity:.7; }
-  .map .mstale { color:#e0b04f; } .map .mobjective code { font-size:11px; }
+  .map .mstale { color:#e0b04f; } .map .mship.warn, .dash .mship.warn { color:#e0b04f; } .mship a { color:#7fd3b9; } .map .mobjective code { font-size:11px; }
+  .mnow { margin:4px 0; font-size:11.5px; } .mnow b { color:#9fc6f0; }
+  .mlog { margin:2px 0 8px; font-size:11px; } .mlog summary { cursor:pointer; opacity:.75; }
+  .mlog pre { margin:4px 0 0; padding:6px 8px; background:#0f1218; border:1px solid var(--vscode-widget-border,#333); border-radius:4px; max-height:180px; overflow:auto; white-space:pre-wrap; font-size:10.5px; line-height:1.35; }
   .map .mzone { margin:6px 0; } .map summary { cursor:pointer; }
   .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:#4a5160; }
   .map .mclean { padding:4px 0; border-top:1px solid var(--vscode-widget-border,#333); font-size:11.5px; }
@@ -567,6 +612,8 @@ module.exports = {
   stackHtml,
   mapHtml,
   mapActions,
+  shipLine,
+  progressHtml,
   greyZonesHtml,
   taskIndex,
   MAP_CSS,

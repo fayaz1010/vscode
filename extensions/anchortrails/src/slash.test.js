@@ -92,3 +92,15 @@ describe('/map arguments and what the chat says back', () => {
     assert.match(mapActionMarkdown('run', { ok: false, needs_plan: true, reason: 'no plan yet' }), /no plan yet/);
   });
 });
+
+describe('/ship', () => {
+  const { planTag, mapActionMarkdown } = require('./slash');
+  it('is a chat command, prod is a deliberate word, and the reply says what happens', () => {
+    assert.deepEqual(planTag({ command: 'ship', prompt: '' }), { kind: 'ship', rest: '' });
+    assert.deepEqual(planTag({ prompt: '/ship prod' }), { kind: 'ship', rest: 'prod' });
+    assert.match(mapActionMarkdown('ship', { ok: true }), /Shipping: commit what the run closed, build, push, preview-deploy/);
+    assert.match(mapActionMarkdown('ship', { ok: true, prod: true }), /Shipping to production/);
+    assert.match(mapActionMarkdown('ship', { ok: false, needs_run: true, reason: 'nothing has run' }), /nothing has run/);
+    assert.match(mapActionMarkdown('run', { ok: true, ships_after: true }), /committed, built, pushed and preview-deployed when the run ends/);
+  });
+});
