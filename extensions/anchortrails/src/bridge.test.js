@@ -417,3 +417,16 @@ describe('BridgeClient', () => {
     }
   });
 });
+
+describe('bridge errors read as text', () => {
+  it('flattens an object detail so the message is never [object Object]', async () => {
+    const client = new BridgeClient({
+      token: 't',
+      fetch: fakeFetch(() => ({ status: 422, body: { detail: [{ loc: ['body', 'repo'], msg: 'field required' }] } })),
+    });
+    const out = await client.mapRefresh({ repo: 'D:\\x' });
+    assert.equal(out.ok, false);
+    assert.match(out.reason, /field required/);
+    assert.doesNotMatch(String(out.reason), /object Object/);
+  });
+});

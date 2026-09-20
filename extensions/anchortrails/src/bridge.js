@@ -69,6 +69,12 @@ class BridgeClient {
     } catch {
       data = {};
     }
+    // FastAPI puts validation errors and raised details under `detail` as objects or
+    // arrays; an Error whose message is an object renders as "[object Object]" and
+    // says nothing. Flatten it to text before it becomes a message.
+    if (data && typeof data === 'object' && data.detail && typeof data.detail !== 'string') {
+      try { data.detail = JSON.stringify(data.detail).slice(0, 600); } catch { data.detail = String(data.detail); }
+    }
     if (r.status === 401) {
       throw new BridgeAuthError(data.detail || data.error || 'missing or invalid bearer token', {
         status: 401, body: data,
