@@ -307,16 +307,27 @@ async function handleTurn({
     if (tag && (tag.kind === 'map' || tag.kind === 'run')) {
       // The map and the run: the bridge does the work, the chat reports it, the panel
       // shows it. No model turn -- the person asked for an action, not an answer.
-      const { mapActionMarkdown } = require('./slash');
+      const { mapActionMarkdown, mapArgs } = require('./slash');
+      const repo = folderPath(vscode) || '';
       let out;
       let kind = tag.kind;
       if (tag.kind === 'map') {
-        out = client && typeof client.mapRefresh === 'function' ? await client.mapRefresh() : { ok: false, reason: 'no bridge' };
+        const args = mapArgs(tag.rest);
+        if (args.action === 'plan') {
+          kind = 'plan';
+          out = client && typeof client.mapPlan === 'function'
+            ? await client.mapPlan({ repo, objective: args.objective })
+            : { ok: false, reason: 'no bridge' };
+        } else {
+          out = client && typeof client.mapRefresh === 'function'
+            ? await client.mapRefresh({ repo, subtree: args.subtree, force: args.force })
+            : { ok: false, reason: 'no bridge' };
+        }
       } else if (/^status\b/i.test(tag.rest)) {
         kind = 'status';
-        out = { map: client && typeof client.map === 'function' ? await client.map() : null };
+        out = { map: client && typeof client.map === 'function' ? await client.map({ repo }) : null };
       } else {
-        out = client && typeof client.mapApply === 'function' ? await client.mapApply() : { ok: false, reason: 'no bridge' };
+        out = client && typeof client.mapApply === 'function' ? await client.mapApply({ repo }) : { ok: false, reason: 'no bridge' };
       }
       response.markdown(mapActionMarkdown(kind, out));
       return { metadata: { slash: kind, session_id: sessionId } };

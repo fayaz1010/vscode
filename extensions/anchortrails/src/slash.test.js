@@ -64,3 +64,25 @@ describe('what the chat says for /map and /run', () => {
     assert.match(mapActionMarkdown('status', { map: { run: null } }), /No run yet/);
   });
 });
+
+describe('/map arguments and what the chat says back', () => {
+  const { mapArgs, mapActionMarkdown } = require('./slash');
+  it('reads nothing, force, a subtree, or plan <objective>', () => {
+    assert.deepEqual(mapArgs(''), { action: 'refresh' });
+    assert.deepEqual(mapArgs('force'), { action: 'refresh', force: true });
+    assert.deepEqual(mapArgs('extensions/anchortrails'), { action: 'refresh', subtree: 'extensions/anchortrails' });
+    assert.deepEqual(mapArgs('plan finish the panel'), { action: 'plan', objective: 'finish the panel' });
+    assert.deepEqual(mapArgs('plan'), { action: 'plan', objective: '' }, 'plan with no words: the stored objective, or the question');
+  });
+  it('says current, asks for the objective, and reports what was started', () => {
+    assert.match(mapActionMarkdown('map', { ok: true, current: true, head: 'abcdef1234' }), /current \(abcdef12\)/);
+    assert.match(mapActionMarkdown('map', { ok: true, started: true, focus: 'focus: src (47 files)' }), /Re-map started \(focus: src \(47 files\)\)/);
+    assert.match(mapActionMarkdown('map', { ok: false, too_big: true, reason: 'D:\\x has 13,446 source files; a whole-repo map is hours. Name a subtree: /map ext' }), /Name a subtree/);
+    const ask = mapActionMarkdown('plan', { ok: false, needs_objective: true, reason: 'no objective for D:\\x yet: what is the plan for?' });
+    assert.match(ask, /what is the plan for/);
+    assert.match(ask, /\/map plan <objective>/);
+    assert.match(mapActionMarkdown('plan', { ok: true, started: true, objective: 'finish the panel' }), /Planning for: \*\*finish the panel\*\*/);
+    assert.match(mapActionMarkdown('plan', { ok: false, needs_map: true, reason: 'no map for D:\\x yet; /map first' }), /\/map first/);
+    assert.match(mapActionMarkdown('run', { ok: false, needs_plan: true, reason: 'no plan yet' }), /no plan yet/);
+  });
+});

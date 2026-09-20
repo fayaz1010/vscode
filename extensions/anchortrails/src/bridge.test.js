@@ -120,6 +120,23 @@ describe('BridgeClient', () => {
     assert.deepEqual(await refused.mapRefresh(), { ok: false, reason: 'bridge down' });
   });
 
+  it('map asks for the open folder, and mapPlan carries the objective', async () => {
+    const seen = [];
+    const client = new BridgeClient({
+      token: 't',
+      fetch: fakeFetch((url, init) => { seen.push({ url, init }); return { status: 200, body: { ok: true } }; }),
+    });
+    await client.map({ repo: 'D:\\code oss' });
+    assert.match(seen[0].url, /\/api\/map\?repo=D%3A%5Ccode%20oss$/);
+    await client.mapPlan({ repo: 'D:\\x', objective: 'finish the panel' });
+    assert.match(seen[1].url, /\/api\/map\/plan$/);
+    assert.deepEqual(JSON.parse(seen[1].init.body), { repo: 'D:\\x', objective: 'finish the panel' });
+    await client.mapRefresh({ repo: 'D:\\x', subtree: 'src', force: true });
+    assert.deepEqual(JSON.parse(seen[2].init.body), { repo: 'D:\\x', subtree: 'src', force: true });
+    await client.mapApply({ repo: 'D:\\x' });
+    assert.deepEqual(JSON.parse(seen[3].init.body), { repo: 'D:\\x' });
+  });
+
   it('mapApply POSTs the one call that writes code', async () => {
     let seen;
     const client = new BridgeClient({

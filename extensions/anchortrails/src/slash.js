@@ -42,9 +42,17 @@ function planTag(request) {
 function mapActionMarkdown(kind, out) {
   const o = out || {};
   if (kind === 'map') {
+    if (o.ok && o.current) return `The map is current (${String(o.head || '').slice(0, 8)}). \`/map force\` rebuilds it anyway.`;
     return o.ok
-      ? 'Re-map started. The Map in the AT Panel shows each stage as it lands and goes `complete` when done.'
+      ? `Re-map started (${o.focus || 'whole repository'}). The Map in the AT Panel shows each stage as it lands and goes \`complete\` when done.`
       : `Re-map not started: ${o.reason || 'no bridge'}`;
+  }
+  if (kind === 'plan') {
+    if (o.needs_objective) return `${o.reason || 'No objective yet.'}\n\nTell me what the plan is for: \`/map plan <objective>\` — one sentence, the way you would brief a person.`;
+    if (o.needs_map) return `${o.reason || 'No map yet.'}`;
+    return o.ok
+      ? `Planning for: **${o.objective || ''}**. The plan appears beside the Map in the AT Panel when it lands; \`/run\` then runs it.`
+      : `Plan not started: ${o.reason || 'no bridge'}`;
   }
   if (kind === 'status') {
     const { runSummary, runMark } = require('./plan');
@@ -57,9 +65,22 @@ function mapActionMarkdown(kind, out) {
     const head = `**${run.status === 'running' ? 'Running' : 'Run'}** · ${runSummary(run) || `${run.results.length} task(s)`}`;
     return [head, ...lines].join('\n');
   }
+  if (o.needs_plan) return `${o.reason || 'No plan yet.'}`;
   return o.ok
-    ? 'Run started. Each task shows on its finding in the AT Panel as it closes or fails; `/run status` for the totals.'
+    ? 'Run started. If the map is behind the tree it re-maps and re-plans first, from the stored objective. Each task shows on its finding in the AT Panel as it closes or fails; `/run status` for the totals.'
     : `Run not started: ${o.reason || 'no bridge'}`;
+}
+
+// What /map's words mean: nothing -> map (or say it is current); `force` -> rebuild;
+// `plan ...` -> plan for that objective (or the stored one); anything else -> map that
+// subtree, and remember it as the focus for this project.
+function mapArgs(rest) {
+  const r = String(rest || '').trim();
+  if (!r) return { action: 'refresh' };
+  if (/^force$/i.test(r)) return { action: 'refresh', force: true };
+  const m = /^plan\b\s*(.*)$/is.exec(r);
+  if (m) return { action: 'plan', objective: m[1].trim() };
+  return { action: 'refresh', subtree: r };
 }
 
 function planMarkdown(plan) {
@@ -80,4 +101,4 @@ function planMarkdown(plan) {
 }
 
 module.exports = {
-  mapActionMarkdown, planTag, planMarkdown, REFRESH_LINE };
+  mapActionMarkdown, mapArgs, planTag, planMarkdown, REFRESH_LINE };

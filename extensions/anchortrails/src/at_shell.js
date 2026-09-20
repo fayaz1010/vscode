@@ -251,6 +251,7 @@ function shellHtml(data, tab, err) {
           cmd: el.dataset.cmd,
           id: el.dataset.id,
           task: el.dataset.task,
+          draft: el.dataset.draft === '1',
           q,
           slug: slugEl ? slugEl.value : undefined,
           fallback: fbEl ? fbEl.value : undefined,

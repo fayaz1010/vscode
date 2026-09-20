@@ -150,10 +150,12 @@ function mapSig(map) {
   const m = (map && map.overview && map.overview.meta) || {};
   const plan = map && map.plan;
   const run = map && map.run;
+  const cur = (map && map.currency) || {};
   return [m.generated_at, m.stages_done, m.status, m.findings_total, m.findings_actionable,
     plan && plan.plan_id, plan && plan.revision,
     run && run.status, run && (run.updated_at || run.finished_at), run && Array.isArray(run.results) ? run.results.length : 0,
-    map && map.running ? 1 : 0].join('/');
+    map && map.running ? 1 : 0, map && map.mapping ? 1 : 0, map && map.planning ? 1 : 0,
+    cur.state, cur.tree_head, map && map.objective].join('/');
 }
 
 const MAP_POLL_MS = 5000;
@@ -206,7 +208,9 @@ function startHome(client, vscode, extras = {}) {
       if (msg.cmd === 'chat') {
         // A panel button is a sentence: it goes into @at and is sent. The chat does
         // the work (/map, /run) and the panel shows the result on its poll.
-        try { await openChat(vscode, { query: String(msg.id || ''), send: true }); } catch { /* chat optional */ }
+        // A draft (data-draft) is left in the box for the person to finish -- that is how
+        // the objective gets typed: "/map plan " and the sentence is theirs.
+        try { await openChat(vscode, { query: String(msg.id || ''), send: !msg.draft }); } catch { /* chat optional */ }
         return;
       }
       if (msg.cmd === 'refresh') {
@@ -311,9 +315,11 @@ function startHome(client, vscode, extras = {}) {
       // The map rides on the same paint. Its failure is its own -- a bridge that
       // cannot read the map still has a plan to show, so this never throws into
       // the panel's error path; it renders as "no map yet" instead.
+      // THE MAP OF THE FOLDER THAT IS OPEN. The bridge keys maps by folder and says
+      // whether this one is current with the tree; the panel shows what it says.
       let map = null;
       if (client && typeof client.map === 'function') {
-        try { map = await client.map(); } catch (err) { map = { ok: false, reason: String((err && err.message) || err) }; }
+        try { map = await client.map({ repo: folderPath(vscode) || '' }); } catch (err) { map = { ok: false, reason: String((err && err.message) || err) }; }
       }
       lastMap = map;
       retries = 0;
@@ -361,7 +367,7 @@ function startHome(client, vscode, extras = {}) {
       pollTimer = setInterval(async () => {
         if (!editor) return stopPoll();
         try {
-          const fresh = await client.map();
+          const fresh = await client.map({ repo: folderPath(vscode) || '' });
           if (mapSig(fresh) !== mapSig(lastMap)) await paint();
         } catch { /* offline: try again next tick */ }
       }, MAP_POLL_MS);

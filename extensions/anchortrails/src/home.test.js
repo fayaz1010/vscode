@@ -109,5 +109,9 @@ describe('the map in the editor host', () => {
     assert.notEqual(mapSig(landed), mapSig(another), 'and so does each task after it');
     const started = JSON.parse(JSON.stringify(a)); started.running = true;
     assert.notEqual(mapSig(a), mapSig(started), 'the bridge starting a run repaints');
+    const moved = JSON.parse(JSON.stringify(a)); moved.currency = { state: 'stale', tree_head: 'x' };
+    assert.notEqual(mapSig(a), mapSig(moved), 'the tree moving past the map repaints');
+    const stated = JSON.parse(JSON.stringify(a)); stated.objective = 'finish it';
+    assert.notEqual(mapSig(a), mapSig(stated), 'an objective being stated repaints');
   });
 });

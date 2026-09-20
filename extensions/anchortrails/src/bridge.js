@@ -116,8 +116,20 @@ class BridgeClient {
   // the webview never reads repo-dash's out/ directory itself, the bridge does.
   // A missing map comes back as { ok:false, reason } -- a state, not a throw --
   // so the panel can say "no map yet" instead of painting an error banner.
-  async map() {
-    const { r, data } = await this._json('GET', '/api/map');
+  async map({ repo } = {}) {
+    const q = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    const { r, data } = await this._json('GET', `/api/map${q}`);
+    if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
+    return data;
+  }
+
+  // Plan the work the map found, for an objective. The objective given here is stored
+  // for the project; without one the bridge answers needs_objective and the chat asks.
+  async mapPlan({ repo, objective } = {}) {
+    const body = {};
+    if (repo) body.repo = repo;
+    if (objective) body.objective = objective;
+    const { r, data } = await this._json('POST', '/api/map/plan', body);
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
     return data;
   }
@@ -125,16 +137,20 @@ class BridgeClient {
   // The one write on the map surface: ask the bridge to re-run the mapper it was
   // configured with. Returns at once; progress arrives through map() as
   // overview.meta.status moves from `streaming` to `complete`.
-  async mapRefresh() {
-    const { r, data } = await this._json('POST', '/api/map/refresh', {});
+  async mapRefresh({ repo, subtree, force } = {}) {
+    const body = {};
+    if (repo) body.repo = repo;
+    if (subtree) body.subtree = subtree;
+    if (force) body.force = true;
+    const { r, data } = await this._json('POST', '/api/map/refresh', body);
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
     return data;
   }
 
   // THE ONE CALL THAT WRITES CODE: run the plan beside the map through repo-dash's
   // runner. Only /run in chat reaches this.
-  async mapApply() {
-    const { r, data } = await this._json('POST', '/api/map/apply', {});
+  async mapApply({ repo } = {}) {
+    const { r, data } = await this._json('POST', '/api/map/apply', repo ? { repo } : {});
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
     return data;
   }

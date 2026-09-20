@@ -57,11 +57,11 @@
           },
           {
             "name": "map",
-            "description": "Re-run the code map (repo-dash) for the bound folder; the AT Panel shows each stage."
+            "description": "Map the open folder (repo-dash). /map <subtree> focuses; /map force rebuilds a current map; /map plan <objective> plans the work the map found."
           },
           {
             "name": "run",
-            "description": "Run the plan beside the map: dispatch, verify, review, close. Add status to read the run back."
+            "description": "Run the plan beside the map: re-map and re-plan if stale, then dispatch, verify, review, close. /run status reads the run back."
           }
         ]
       }

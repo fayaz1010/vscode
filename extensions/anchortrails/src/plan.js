@@ -212,13 +212,37 @@ function mapHtml(map, esc) {
   // The buttons put a command into the chat and send it; the chat does the work.
   // Every action the panel offers is a sentence the person could have typed.
   const running = Boolean(map && map.running);
+  const mapping = Boolean(map && map.mapping);
+  const planning = Boolean(map && map.planning);
+  const cur = (map && map.currency) || {};
+  const objective = map && map.objective ? String(map.objective) : '';
   const remap = map && map.can_refresh
-    ? '<button data-cmd="chat" data-id="/map" class="refresh remap">Re-map</button>'
+    ? `<button data-cmd="chat" data-id="${cur.state === 'current' ? '/map force' : '/map'}" class="refresh remap${mapping ? ' running' : ''}"${mapping ? ' disabled' : ''}>${mapping ? 'Mapping…' : (cur.state === 'stale' ? 'Re-map (stale)' : cur.state === 'none' ? 'Map this folder' : 'Re-map')}</button>`
+    : '';
+  // Plan asks for the objective when there is none: the button leaves "/map plan " in
+  // the chat box as a draft, and the sentence that follows is the person's.
+  const planBtn = map && map.can_plan
+    ? (objective
+      ? `<button data-cmd="chat" data-id="/map plan" class="refresh planbtn${planning ? ' running' : ''}"${planning ? ' disabled' : ''}>${planning ? 'Planning…' : (map.plan ? 'Re-plan' : 'Plan')}</button>`
+      : '<button data-cmd="chat" data-id="/map plan " data-draft="1" class="refresh planbtn">Plan… (needs an objective)</button>')
     : '';
   const runBtn = map && map.can_apply
     ? `<button data-cmd="chat" data-id="${running ? '/run status' : '/run'}" class="refresh runplan${running ? ' running' : ''}">${running ? 'Running… (status)' : 'Run plan'}</button>`
     : '';
-  const actions = remap || runBtn ? `<div class="mactions">${remap}${runBtn}</div>` : '';
+  const actions = remap || planBtn || runBtn ? `<div class="mactions">${remap}${planBtn}${runBtn}</div>` : '';
+  // The folder, the map's currency, and the objective: what the map is of, whether it
+  // still describes the tree, and what the plan is for. Said in one line each.
+  const where = (map && map.project && map.project.root) || (map && map.repo) || '';
+  const currencyLine = cur.state === 'stale'
+    ? `<p class="muted mstale">map from ${escape(String(cur.map_head || '').slice(0, 8))} · tree at ${escape(String(cur.tree_head || '').slice(0, 8))} — stale; Re-map, or /run re-maps first</p>`
+    : cur.state === 'current'
+      ? `<p class="muted">map current at ${escape(String(cur.tree_head || '').slice(0, 8))}</p>`
+      : '';
+  const objectiveLine = map && map.can_plan
+    ? (objective
+      ? `<p class="muted mobjective">objective: ${escape(objective)}</p>`
+      : '<p class="muted mobjective">no objective yet — the plan comes from one: Plan…, or <code>/map plan &lt;objective&gt;</code> in @at</p>')
+    : '';
   if (!map || !map.ok || !map.overview) {
     const why = (map && map.reason) || 'No map for this folder yet. Run repo-dash, or point ~/.anchortrails/map.json at its out/.';
     return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p>${actions}</section>`;
@@ -267,7 +291,8 @@ function mapHtml(map, esc) {
   const stage = building && meta.stages_total
     ? `mapping ${Number(meta.stages_done || 0)}/${Number(meta.stages_total)}${meta.stage ? ' · ' + meta.stage : ''}`
     : (meta.status === 'complete' ? 'complete' : (meta.status || 'building'));
-  const summary = runSummary(map.run) + (running ? (runSummary(map.run) ? ' · ' : '') + 'run in progress' : '');
+  const summary = runSummary(map.run) + (running ? (runSummary(map.run) ? ' · ' : '') + 'run in progress' : '')
+    + (planning ? (runSummary(map.run) || running ? ' · ' : '') + 'planning…' : '');
   // One line, joined with the separator: a multi-line template put newlines between
   // the pieces, which is invisible in a browser and wrong everywhere else.
   const head = `<p class="muted">${[
@@ -279,7 +304,7 @@ function mapHtml(map, esc) {
   const body = zones.length
     ? zones.map(zoneBlock).join('')
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}"><h3>Map</h3>${head}${actions}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${actions}${body}</section>`;
 }
 
 const MAP_CSS = `
@@ -295,8 +320,9 @@ const MAP_CSS = `
   .map .mtask.m-failed { background:#6a2d2d66; color:#f0a09f; }
   .map .mtask.m-skipped_dirty, .map .mtask.m-blocked { background:#55555566; color:#cfcfcf; }
   .map.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }
-  .map .mactions { display:flex; gap:6px; } .map .remap, .map .runplan { margin:0 0 6px; }
-  .map .runplan.running { opacity:.7; }
+  .map .mactions { display:flex; gap:6px; flex-wrap:wrap; } .map .remap, .map .runplan, .map .planbtn { margin:0 0 6px; }
+  .map .runplan.running, .map .remap.running, .map .planbtn.running { opacity:.7; }
+  .map .mstale { color:#e0b04f; } .map .mobjective code { font-size:11px; }
   .map .mzone { margin:6px 0; } .map summary { cursor:pointer; }
   .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
 `;

@@ -169,4 +169,27 @@ describe('the map beside the stack', () => {
     assert.match(live, /run in progress/);
     assert.doesNotMatch(mapHtml(MAP, esc), /runplan/, 'no plan or no mapper: no Run');
   });
+
+  it('says whether the map is current, what the plan is for, and asks for the objective as a draft', () => {
+    const stale = { ...MAP, can_refresh: true, can_plan: true, project: { root: '/r/backend' },
+      currency: { state: 'stale', map_head: 'aaaaaaaa1111', tree_head: 'bbbbbbbb2222' } };
+    let html = mapHtml(stale, esc);
+    assert.match(html, /map from aaaaaaaa · tree at bbbbbbbb — stale/);
+    assert.match(html, /data-id="\/map" class="refresh remap">Re-map \(stale\)</);
+    assert.match(html, /data-id="\/map plan " data-draft="1"[^>]*>Plan… \(needs an objective\)</, 'no objective: the button leaves the sentence to the person');
+    assert.match(html, /no objective yet/);
+    const current = { ...stale, currency: { state: 'current', tree_head: 'bbbbbbbb2222' }, objective: 'finish the panel' };
+    html = mapHtml(current, esc);
+    assert.match(html, /map current at bbbbbbbb/);
+    assert.match(html, /data-id="\/map force" class="refresh remap">Re-map</, 'a current map is only rebuilt when forced');
+    assert.match(html, /objective: finish the panel/);
+    assert.match(html, /data-id="\/map plan" class="refresh planbtn">Re-plan</, 'an objective and a plan: re-plan');
+    const none = { ok: false, reason: 'no map for /r/backend yet — /map in @at builds one', can_refresh: true, currency: { state: 'none' } };
+    html = mapHtml(none, esc);
+    assert.match(html, /Map this folder/);
+    const busy = { ...current, mapping: true, planning: true };
+    html = mapHtml(busy, esc);
+    assert.match(html, /Mapping…/);
+    assert.match(html, /Planning…/);
+  });
 });
