@@ -6,9 +6,16 @@
 
 const REFRESH_LINE = /^(refresh|\/refresh|refresh the plan|update the plan|rescore(?: the plan)?)$/i;
 
+function commandName(request) {
+  // The API hands the slash command over as a string (`request.command === 'map'`);
+  // older test doubles used { name }. Read both -- the string form is what runs, and
+  // it was read as nothing, which sent every registered command down the model path.
+  const c = request && request.command;
+  return String(typeof c === 'string' ? c : (c && c.name) || '').toLowerCase();
+}
+
 function planTag(request) {
-  const cmd = String((request && request.command && request.command.name) || '')
-    .toLowerCase();
+  const cmd = commandName(request);
   const raw = String((request && request.prompt) || '');
   // THE MAP AND THE RUN ARE CHAT COMMANDS. /map re-runs the mapper; /run runs the
   // plan beside the map; /run status reads the run back. The panel's buttons put
