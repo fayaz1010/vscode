@@ -164,7 +164,7 @@ function startHome(client, vscode, extras = {}) {
   let view = null;
   let editor = null;
   let retries = 0;
-  let tab = 'plan';
+  let tab = 'dashboard';
   let lastCheck = null;
   let modelExtra = {};
   let lastMap = null;
@@ -188,7 +188,7 @@ function startHome(client, vscode, extras = {}) {
     webview.onDidReceiveMessage(async (msg) => {
       if (!msg) return;
       if (msg.cmd === 'tab') {
-        tab = msg.tab || 'plan';
+        tab = msg.tab || 'dashboard';
         paint();
         return;
       }
@@ -199,9 +199,9 @@ function startHome(client, vscode, extras = {}) {
         return;
       }
       if (msg.cmd === 'show-task') {
-        // The task lives on the Plan tab; switch there and let the next paint carry
-        // the id so the shell can mark it. Nothing to fetch.
-        tab = 'plan';
+        // The task's row is on the Dashboard; switch there and let the next paint
+        // carry the id so the row is marked. Nothing to fetch.
+        tab = 'dashboard';
         paint({ focusTask: msg.task || '' });
         return;
       }

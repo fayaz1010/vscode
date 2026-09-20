@@ -1,10 +1,12 @@
 'use strict';
 /**
- * Middle AT Panel — every dest tab in one editor: Plan (key), Tools,
- * Nodes, Teams, Vault, Models, Workspace, Settings.
+ * Middle AT Panel — every dest tab in one editor: Dashboard (the loop at a
+ * glance), Map (the repo-dash map of the open folder), Plan, Models, Tools,
+ * Nodes, Teams, Vault, Workspace, Settings.
  */
 
 const { STEP_CSS, stackHtml, mapHtml, MAP_CSS } = require('./plan');
+const { dashboardHtml, DASH_CSS } = require('./dashboard');
 const { folderItems, historyItems, cardHtml } = require('./plan_board');
 const {
   rowsFromNodes,
@@ -26,6 +28,8 @@ const FALLBACK_SURFACES = [
 ];
 
 const TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'map', label: 'Map' },
   { id: 'plan', label: 'Plan' },
   { id: 'models', label: 'Models' },
   { id: 'tools', label: 'Tools' },
@@ -104,14 +108,10 @@ function planHtml(data) {
     : '<p class="muted">No other plans yet.</p>';
   const main = liveCard || folderBody || '<p class="muted">No plan for this folder yet. A real task in @at chat starts one.</p>';
   const stack = stackHtml((live && live.stack) || (data && data.stack), esc);
-  // The map beside the stack. `data.map` is the bridge's /api/map envelope, fetched by
-  // the editor host on the same paint; absent renders as one muted line.
-  const map = mapHtml(data && data.map, esc);
   return `<p class="muted">${esc((workspace && (workspace.id || workspace.path)) || 'No folder open')}</p>
     <button data-cmd="refresh" class="refresh">Refresh plan</button>
     <p class="hint">Rescores done vs planned against the goal. /plan in chat asks; /plan refresh does the same. Double-click a card, step, node, or tile to put it in @at.</p>
     ${stack}
-    ${map}
     ${main}
     ${taskBody}
     <h3>Other plans</h3>
@@ -143,6 +143,11 @@ function settingsHtml(data) {
 }
 
 function paneHtml(id, data) {
+  // `data.map` is the bridge's /api/map envelope for the open folder, fetched by the
+  // editor host on the same paint. The Map tab shows it finding by finding; the
+  // Dashboard sums it. Absent renders as one muted line on each.
+  if (id === 'dashboard') return dashboardHtml(data && data.map, esc, data && data.focusTask);
+  if (id === 'map') return mapHtml(data && data.map, esc);
   if (id === 'plan') return planHtml(data);
   if (id === 'tools') return toolsHtml(data);
   if (id === 'nodes') return listHtml(rowsFromNodes(data && data.nodes));
@@ -157,7 +162,7 @@ function paneHtml(id, data) {
 }
 
 function shellHtml(data, tab, err) {
-  const on = TABS.some((t) => t.id === tab) ? tab : 'plan';
+  const on = TABS.some((t) => t.id === tab) ? tab : 'dashboard';
   const banner = err
     ? `<p class="warn">AT node ${esc(err.status || '')} ${esc(err.message || err)}.</p>`
     : '';
@@ -206,6 +211,7 @@ function shellHtml(data, tab, err) {
   th, td { text-align: left; padding: 3px 4px; }
   ${STEP_CSS}
   ${MAP_CSS}
+  ${DASH_CSS}
 </style></head>
 <body>
   ${banner}

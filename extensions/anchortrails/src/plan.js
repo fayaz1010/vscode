@@ -207,10 +207,10 @@ function runSummary(run) {
   return parts.join(' · ');
 }
 
-function mapHtml(map, esc) {
+// THE BUTTONS. Each puts a sentence into @at and sends it; the chat does the work.
+// Shared by the Map and Dashboard tabs so both offer the same three moves.
+function mapActions(map, esc) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
-  // The buttons put a command into the chat and send it; the chat does the work.
-  // Every action the panel offers is a sentence the person could have typed.
   const running = Boolean(map && map.running);
   const mapping = Boolean(map && map.mapping);
   const planning = Boolean(map && map.planning);
@@ -230,6 +230,17 @@ function mapHtml(map, esc) {
     ? `<button data-cmd="chat" data-id="${running ? '/run status' : '/run'}" class="refresh runplan${running ? ' running' : ''}">${running ? 'Running… (status)' : 'Run plan'}</button>`
     : '';
   const actions = remap || planBtn || runBtn ? `<div class="mactions">${remap}${planBtn}${runBtn}</div>` : '';
+  return actions;
+}
+
+function mapHtml(map, esc) {
+  const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  const running = Boolean(map && map.running);
+  const mapping = Boolean(map && map.mapping);
+  const planning = Boolean(map && map.planning);
+  const cur = (map && map.currency) || {};
+  const objective = map && map.objective ? String(map.objective) : '';
+  const actions = mapActions(map, escape);
   // The folder, the map's currency, and the objective: what the map is of, whether it
   // still describes the tree, and what the plan is for. Said in one line each.
   const where = (map && map.project && map.project.root) || (map && map.repo) || '';
@@ -500,6 +511,7 @@ module.exports = {
   STACK_KEYS,
   stackHtml,
   mapHtml,
+  mapActions,
   taskIndex,
   MAP_CSS,
   stackLines,
