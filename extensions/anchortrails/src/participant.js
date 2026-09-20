@@ -437,7 +437,12 @@ async function handleTurn({
       response.markdown('Credits or entitlement refused (402). That is the only product gate.');
       return { metadata: { error: 'entitlement' } };
     }
-    response.markdown(String((err && err.message) || err));
+    // An error that is not an Error still has a shape; "[object Object]" tells nobody
+    // anything. Say what came back.
+    const shape = err && typeof err === 'object' && !err.message
+      ? (() => { try { return JSON.stringify(err).slice(0, 600); } catch { return String(err); } })()
+      : String((err && (err.message || err.stack)) || err);
+    response.markdown(`AnchorTrails could not finish that turn: ${shape}`);
     return { metadata: { error: 'bridge' } };
   }
 }
