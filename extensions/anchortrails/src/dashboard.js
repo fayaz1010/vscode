@@ -95,15 +95,20 @@ function dashboardHtml(map, esc, focusTask) {
     return `<section class="dash"><h3>Dashboard</h3>${where ? `<p class="muted">${escape(where)}</p>` : ''}<p class="muted">${escape(why)}</p>${actions}</section>`;
   }
   const meta = map.overview.meta || {};
-  const zones = [...(map.overview.zones || [])].sort((a, b) => (b.findings_total || 0) - (a.findings_total || 0));
+  const allZones = map.overview.zones || [];
+  const zones = allZones.filter((z) => z.analysed !== false).sort((a, b) => (b.findings_total || 0) - (a.findings_total || 0));
+  const grey = allZones.filter((z) => z.analysed === false);
+  const shellOnly = meta.status === 'shell';
   const tasks = map.plan && Array.isArray(map.plan.tasks) ? map.plan.tasks : [];
   const runs = runIndex(map.run);
   const tot = runTotals(map.run);
-  const building = meta.status !== 'complete';
+  const building = !shellOnly && meta.status !== 'complete';
 
   // STATE CHIPS. Each says one thing about the loop right now.
   const chips = [];
-  if (map.mapping || building) {
+  if (shellOnly && !map.mapping) {
+    chips.push('<span class="chip warn">structure only — not analysed</span>');
+  } else if (map.mapping || building) {
     chips.push(`<span class="chip busy">${meta.stages_total ? `mapping ${Number(meta.stages_done || 0)}/${Number(meta.stages_total)}` : 'mapping…'}</span>`);
   } else if (cur.state === 'stale') {
     chips.push(`<span class="chip warn">map stale · ${escape(String(cur.map_head || '').slice(0, 8))} → ${escape(String(cur.tree_head || '').slice(0, 8))}</span>`);
@@ -123,7 +128,11 @@ function dashboardHtml(map, esc, focusTask) {
   // THE NUMBERS. Findings the map holds against the tree, tasks the plan made of
   // them, what the run did with the tasks, and what it cost.
   const tile = (n, label, cls) => `<div class="tile ${cls || ''}"><div class="num">${n}</div><div class="meta">${label}</div></div>`;
+  const readTile = meta.files_total_repo != null
+    ? tile(`${Number(meta.files_analysed || 0).toLocaleString()}<small>/${Number(meta.files_total_repo).toLocaleString()}</small>`, 'files read')
+    : '';
   const tiles = `<div class="tiles">
+    ${readTile}
     ${tile(`${Number(meta.findings_actionable || 0)}<small>/${Number(meta.findings_total || 0)}</small>`, 'actionable findings')}
     ${tile(String(tasks.length), 'planned tasks')}
     ${tile(String(tot.closed), 'closed', tot.closed ? 'good' : '')}
@@ -151,14 +160,27 @@ function dashboardHtml(map, esc, focusTask) {
         <span class="dnum">${r.actionable}${r.total !== r.actionable ? `<small>/${r.total}</small>` : ''}</span>
       </div>`).join('')}`
     : '';
-  const colour = (s) => (s >= 0.7 ? '#e2533f' : s >= 0.5 ? '#c2811f' : s >= 0.3 ? '#8a7b28' : '#6b7484');
+  // an analysed zone with nothing found is green; a zone nobody read is grey
+  const colour = (z) => {
+    const s = Number(z.colour || 0);
+    if (!(z.findings_total || 0)) return '#3fb950';
+    return s >= 0.7 ? '#e2533f' : s >= 0.5 ? '#c2811f' : s >= 0.3 ? '#8a7b28' : '#6b7484';
+  };
   const maxZ = Math.max(...zones.map((z) => Number(z.findings_total || 0)), 1);
-  const zoneList = zones.length
+  const greyFiles = grey.reduce((n, z) => n + Number(z.files || 0), 0);
+  const greyRow = grey.length
+    ? `<div class="drow dgrey">
+        <span class="dname"><span class="mdot" style="background:#4a5160"></span>not analysed yet</span>
+        <span class="dbar"><span class="seg all" style="width:${Math.round((greyFiles / Math.max(greyFiles + Number(meta.files_analysed || 0), 1)) * 100)}%"></span></span>
+        <span class="dnum">${grey.length}<small> zones · ${greyFiles.toLocaleString()} files</small></span>
+      </div>`
+    : '';
+  const zoneList = zones.length || grey.length
     ? `<h3>Zones</h3>${zones.map((z) => `<div class="drow">
-        <span class="dname"><span class="mdot" style="background:${colour(Number(z.colour || 0))}"></span>${escape(z.zone)}</span>
-        <span class="dbar"><span class="seg act" style="width:${Math.round((Number(z.findings_total || 0) / maxZ) * 100)}%;background:${colour(Number(z.colour || 0))}"></span></span>
+        <span class="dname"><span class="mdot" style="background:${colour(z)}"></span>${escape(z.zone)}</span>
+        <span class="dbar"><span class="seg act" style="width:${Math.round((Number(z.findings_total || 0) / maxZ) * 100)}%;background:${colour(z)}"></span></span>
         <span class="dnum">${Number(z.findings_total || 0)}<small> · ${Number(z.files || 0)} files</small></span>
-      </div>`).join('')}`
+      </div>`).join('')}${greyRow}`
     : '';
 
   // TASKS. One row per plan task: the run's mark, what it is to deliver (linked into

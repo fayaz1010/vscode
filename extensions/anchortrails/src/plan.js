@@ -233,6 +233,32 @@ function mapActions(map, esc) {
   return actions;
 }
 
+// THE UNREAD PART OF THE REPOSITORY. Grey zones grouped under their top-level
+// directory, collapsed: one line says how much is unread, the tree opens on demand.
+// A queued zone is one the current focus will colour in -- said so, so the grey is
+// legible as "not yet" rather than "never".
+function greyZonesHtml(grey, escape, opts = {}) {
+  if (!grey || !grey.length) return '';
+  const files = grey.reduce((n, z) => n + Number(z.files || 0), 0);
+  const queued = grey.filter((z) => z.queued);
+  const groups = {};
+  for (const z of grey) {
+    const top = String(z.zone || '').split('/')[0] || '<root>';
+    (groups[top] = groups[top] || []).push(z);
+  }
+  const groupHtml = Object.entries(groups)
+    .sort((a, b) => b[1].reduce((n, z) => n + (z.files || 0), 0) - a[1].reduce((n, z) => n + (z.files || 0), 0))
+    .map(([top, zs]) => {
+      const n = zs.reduce((m, z) => m + Number(z.files || 0), 0);
+      const rows = zs.slice(0, 40).map((z) => `<div class="mgrey${z.queued ? ' queued' : ''}"><span class="mdot"></span>${escape(z.zone)}<span class="muted"> · ${Number(z.files || 0)}${z.queued ? (opts.mapping ? ' · queued' : ' · in focus, not read') : ''}</span></div>`).join('')
+        + (zs.length > 40 ? `<div class="mgrey muted">… ${zs.length - 40} more</div>` : '');
+      return `<details class="mgroup"><summary><span class="mdot"></span><b>${escape(top)}</b><span class="muted"> · ${zs.length} zone${zs.length === 1 ? '' : 's'} · ${n.toLocaleString()} files</span></summary>${rows}</details>`;
+    }).join('');
+  const label = `not analysed yet · ${grey.length} zone${grey.length === 1 ? '' : 's'} · ${files.toLocaleString()} files`
+    + (queued.length ? ` · ${queued.length} queued` : '');
+  return `<details class="munread"><summary><span class="mdot"></span>${escape(label)}</summary>${groupHtml}</details>`;
+}
+
 function mapHtml(map, esc) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
   const running = Boolean(map && map.running);
@@ -262,9 +288,17 @@ function mapHtml(map, esc) {
     return `<section class="map"><h3>Map</h3><p class="muted">${escape(why)}</p>${actions}</section>`;
   }
   const meta = map.overview.meta || {};
-  const zones = [...(map.overview.zones || [])]
+  // THREE KINDS OF ZONE. Analysed with findings: coloured by the worst one. Analysed
+  // and clean: green -- "nothing we can see", said once per zone. Not analysed:
+  // grey, the shell's structure, grouped so 300 of them read as a tree, not a wall.
+  // A map from before the flag existed has no `analysed` field: everything on it was.
+  const all = map.overview.zones || [];
+  const analysed = all.filter((z) => z.analysed !== false);
+  const grey = all.filter((z) => z.analysed === false);
+  const zones = analysed
     .filter((z) => (z.findings_total || 0) > 0)
     .sort((a, b) => (b.colour || 0) - (a.colour || 0));
+  const clean = analysed.filter((z) => !(z.findings_total || 0));
   const index = taskIndex(map.plan);
   const taskFor = (f) => index[`${f.marker}|${f.path}|${f.symbol}`] || index[`${f.marker}|${f.path}|`] || '';
   const runs = runIndex(map.run);
@@ -300,11 +334,18 @@ function mapHtml(map, esc) {
     </details>`;
   };
   const planned = map.plan && Array.isArray(map.plan.tasks) ? map.plan.tasks.length : 0;
-  // While run.sh is re-mapping it emits a partial after every stage; say which.
-  const building = meta.status !== 'complete';
-  const stage = building && meta.stages_total
-    ? `mapping ${Number(meta.stages_done || 0)}/${Number(meta.stages_total)}${meta.stage ? ' · ' + meta.stage : ''}`
-    : (meta.status === 'complete' ? 'complete' : (meta.status || 'building'));
+  // While run.sh is re-mapping it emits a partial after every stage; say which. A
+  // shell is structure only: not building, not complete -- waiting to be aimed.
+  const shellOnly = meta.status === 'shell';
+  const building = !shellOnly && meta.status !== 'complete';
+  const stage = shellOnly
+    ? 'structure only — nothing analysed yet'
+    : building && meta.stages_total
+      ? `mapping ${Number(meta.stages_done || 0)}/${Number(meta.stages_total)}${meta.stage ? ' · ' + meta.stage : ''}`
+      : (meta.status === 'complete' ? 'complete' : (meta.status || 'building'));
+  const read = meta.files_total_repo != null
+    ? `${Number(meta.files_analysed || 0).toLocaleString()} of ${Number(meta.files_total_repo).toLocaleString()} files read`
+    : '';
   const summary = runSummary(map.run) + (running ? (runSummary(map.run) ? ' · ' : '') + 'run in progress' : '')
     + (planning ? (runSummary(map.run) || running ? ' · ' : '') + 'planning…' : '');
   // One line, joined with the separator: a multi-line template put newlines between
@@ -314,11 +355,13 @@ function mapHtml(map, esc) {
     `${Number(meta.findings_actionable || 0)} actionable of ${Number(meta.findings_total || 0)}`,
     planned ? `${planned} planned task${planned === 1 ? '' : 's'}` : 'no plan yet',
     escape(stage),
-  ].concat(summary ? [escape(summary)] : []).join(' · ')}</p>`;
-  const body = zones.length
-    ? zones.map(zoneBlock).join('')
+  ].concat(read ? [escape(read)] : []).concat(summary ? [escape(summary)] : []).join(' · ')}</p>`;
+  const cleanRows = clean.map((z) => `<div class="mclean"><span class="mdot" style="background:#3fb950"></span><b>${escape(z.zone)}</b><span class="muted"> · ${Number(z.files || 0)} files · nothing found</span></div>`).join('');
+  const greyBlock = greyZonesHtml(grey, escape, { mapping: mapping || building });
+  const body = zones.length || cleanRows || greyBlock
+    ? zones.map(zoneBlock).join('') + cleanRows + greyBlock
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${actions}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${actions}${body}</section>`;
 }
 
 const MAP_CSS = `
@@ -338,7 +381,13 @@ const MAP_CSS = `
   .map .runplan.running, .map .remap.running, .map .planbtn.running { opacity:.7; }
   .map .mstale { color:#e0b04f; } .map .mobjective code { font-size:11px; }
   .map .mzone { margin:6px 0; } .map summary { cursor:pointer; }
-  .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  .map .mdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:#4a5160; }
+  .map .mclean { padding:4px 0; border-top:1px solid var(--vscode-widget-border,#333); font-size:11.5px; }
+  .map .munread { margin:6px 0; opacity:.85; } .map .munread > summary { font-size:11.5px; }
+  .map .mgroup { margin:2px 0 2px 14px; font-size:11.5px; }
+  .map .mgrey { padding:2px 0 2px 24px; font-size:11px; opacity:.75; }
+  .map .mgrey.queued { opacity:1; } .map .mgrey.queued .mdot { background:#c2811f; }
+  .map.shell > h3::after { content:" · structure only"; font-weight:400; opacity:.6; }
 `;
 
 function stackLines(stack) {
@@ -515,6 +564,7 @@ module.exports = {
   stackHtml,
   mapHtml,
   mapActions,
+  greyZonesHtml,
   taskIndex,
   MAP_CSS,
   stackLines,

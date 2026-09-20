@@ -106,6 +106,22 @@ describe('Dashboard tab', () => {
     assert.match(building, /chip busy">mapping 2\/6/);
   });
 
+  it('grey zones are one row, clean zones are green, and the files-read tile leads', () => {
+    const map = { ...MAP, overview: { ...MAP.overview,
+      meta: { ...MAP.overview.meta, files_total_repo: 14197, files_analysed: 48 },
+      zones: [...MAP.overview.zones, { zone: 'src/vs', findings_total: 0, files: 9313, analysed: false },
+        { zone: 'ext/clean', findings_total: 0, files: 2, analysed: true, colour: 0 }] } };
+    const html = dashboardHtml(map, esc);
+    assert.match(html, /<div class="num">48<small>\/14,197<\/small><\/div><div class="meta">files read/);
+    assert.match(html, /background:#3fb950"><\/span>ext\/clean/, 'analysed, nothing found: green');
+    assert.match(html, /not analysed yet<\/span>/);
+    assert.match(html, /<span class="dnum">1<small> zones · 9,313 files/);
+    assert.doesNotMatch(html, /<\/span>src\/vs</, 'a grey zone is counted, not listed');
+    const shell = dashboardHtml({ ...map, overview: { ...map.overview, meta: { ...map.overview.meta, status: 'shell' } } }, esc);
+    assert.match(shell, /chip warn">structure only — not analysed/);
+    assert.doesNotMatch(shell, /class="dash building/);
+  });
+
   it('helpers read the planner and runner formats', () => {
     assert.deepEqual(parseDeliverable('dispose (stub_body, line 207)'), { symbol: 'dispose', marker: 'stub_body', line: 207 });
     assert.deepEqual(parseDeliverable('1 undocumented env var(s) (config_orphan, line 24)'), { symbol: '1 undocumented env var(s)', marker: 'config_orphan', line: 24 });

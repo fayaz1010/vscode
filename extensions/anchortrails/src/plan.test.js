@@ -193,3 +193,54 @@ describe('the map beside the stack', () => {
     assert.match(html, /Planning…/);
   });
 });
+
+describe('the map is of the repository: grey where unread, green where clean', () => {
+  const { mapHtml, greyZonesHtml } = require('./plan');
+  const esc = (v) => String(v ?? '');
+  const MAP = {
+    ok: true, repo: '/r/code-oss',
+    overview: {
+      meta: { repo: '/r/code-oss', status: 'complete', findings_total: 2, findings_actionable: 1,
+        files_total_repo: 14197, files_analysed: 46, zones_total: 4, zones_analysed: 2 },
+      zones: [
+        { zone: 'extensions/anchortrails/src', colour: 0.75, findings_total: 2, files: 40, analysed: true,
+          top: [{ marker: 'bus_factor', symbol: 'plan.js', path: 'extensions/anchortrails/src/plan.js', line: 1, severity: 0.75 }] },
+        { zone: 'extensions/anchortrails/test', colour: 0, findings_total: 0, files: 6, analysed: true, top: [] },
+        { zone: 'src/vs/workbench', colour: 0, findings_total: 0, files: 9000, analysed: false, queued: false, top: [] },
+        { zone: 'extensions/git', colour: 0, findings_total: 0, files: 151, analysed: false, queued: true, top: [] },
+      ],
+    },
+  };
+
+  it('says how much of the repository has been read, and shows every kind of zone', () => {
+    const html = mapHtml(MAP, esc);
+    assert.match(html, /46 of 14,197 files read/);
+    assert.match(html, /<b>extensions\/anchortrails\/src<\/b>/, 'a flagged zone, coloured');
+    assert.match(html, /class="mclean"><span class="mdot" style="background:#3fb950"><\/span><b>extensions\/anchortrails\/test<\/b><span class="muted"> · 6 files · nothing found/, 'analysed and clean: green, said once');
+    assert.match(html, /not analysed yet · 2 zones · 9,151 files · 1 queued/, 'the unread part, in one line');
+    assert.match(html, /<b>src<\/b><span class="muted"> · 1 zone · 9,000 files/, 'grouped under its top-level directory');
+    assert.match(html, /class="mgrey queued"><span class="mdot"><\/span>extensions\/git<span class="muted"> · 151 · in focus, not read/);
+    assert.doesNotMatch(html, /Nothing flagged/);
+  });
+
+  it('a shell is structure only: not mapping, not complete, waiting to be aimed', () => {
+    const shell = { ...MAP, overview: { ...MAP.overview, meta: { ...MAP.overview.meta, status: 'shell', files_analysed: 0, findings_total: 0, findings_actionable: 0 },
+      zones: MAP.overview.zones.map((z) => ({ ...z, analysed: false, findings_total: 0, top: [] })) } };
+    const html = mapHtml(shell, esc);
+    assert.match(html, /<section class="map shell">/);
+    assert.match(html, /structure only — nothing analysed yet/);
+    assert.doesNotMatch(html, /mapping \d/);
+    assert.match(html, /not analysed yet · 4 zones/);
+    const mapping = mapHtml({ ...shell, mapping: true }, esc);
+    assert.match(mapping, /· 151 · queued/, 'while mapping, a queued zone says so');
+  });
+
+  it('a map from before the flag existed treats every zone as analysed', () => {
+    const legacy = { ...MAP, overview: { meta: { status: 'complete', findings_total: 0, findings_actionable: 0 },
+      zones: [{ zone: 'src', colour: 0, findings_total: 0, files: 3, top: [] }] } };
+    const html = mapHtml(legacy, esc);
+    assert.match(html, /class="mclean"/);
+    assert.doesNotMatch(html, /not analysed yet/);
+    assert.equal(greyZonesHtml([], esc), '');
+  });
+});
