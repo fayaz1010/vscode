@@ -156,6 +156,8 @@ function stackHtml(stack, esc) {
  *
  * Absent is a state, not an error. A folder with no map yet says so in one line.
  */
+const { graphSvg } = require('./map_graph');
+
 const CHECK_RX = /reports no `([^`]+)` for `([^`]+)`(?: in `([^`]+)`)?/;
 
 function taskIndex(atPlan) {
@@ -327,7 +329,7 @@ function mapHtml(map, esc) {
   };
   const zoneBlock = (z) => {
     const top = (z.top || []).filter((f) => (f.severity || 0) >= 0.3).slice(0, 12);
-    return `<details class="mzone"${(z.colour || 0) >= 0.6 ? ' open' : ''}>
+    return `<details class="mzone" id="z-${escape(z.slug || '')}"${(z.colour || 0) >= 0.6 ? ' open' : ''}>
       <summary><span class="mdot" style="background:${colour(z.colour || 0)}"></span><b>${escape(z.zone)}</b>
         <span class="muted"> · ${Number(z.findings_total || 0)} finding${z.findings_total === 1 ? '' : 's'} · ${Number(z.files || 0)} files</span></summary>
       ${top.map(finding).join('') || '<p class="muted">nothing at or above 0.30</p>'}
@@ -356,10 +358,11 @@ function mapHtml(map, esc) {
     planned ? `${planned} planned task${planned === 1 ? '' : 's'}` : 'no plan yet',
     escape(stage),
   ].concat(read ? [escape(read)] : []).concat(summary ? [escape(summary)] : []).join(' · ')}</p>`;
-  const cleanRows = clean.map((z) => `<div class="mclean"><span class="mdot" style="background:#3fb950"></span><b>${escape(z.zone)}</b><span class="muted"> · ${Number(z.files || 0)} files · nothing found</span></div>`).join('');
+  const graph = graphSvg(map.overview, escape);
+  const cleanRows = clean.map((z) => `<div class="mclean" id="z-${escape(z.slug || '')}"><span class="mdot" style="background:#3fb950"></span><b>${escape(z.zone)}</b><span class="muted"> · ${Number(z.files || 0)} files · nothing found</span></div>`).join('');
   const greyBlock = greyZonesHtml(grey, escape, { mapping: mapping || building });
   const body = zones.length || cleanRows || greyBlock
-    ? zones.map(zoneBlock).join('') + cleanRows + greyBlock
+    ? graph + zones.map(zoneBlock).join('') + cleanRows + greyBlock
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
   return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${actions}${body}</section>`;
 }

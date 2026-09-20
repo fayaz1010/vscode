@@ -7,6 +7,7 @@
 
 const { STEP_CSS, stackHtml, mapHtml, MAP_CSS } = require('./plan');
 const { dashboardHtml, DASH_CSS } = require('./dashboard');
+const { GRAPH_CSS } = require('./map_graph');
 const { folderItems, historyItems, cardHtml } = require('./plan_board');
 const {
   rowsFromNodes,
@@ -199,6 +200,7 @@ function shellHtml(data, tab, err) {
     color: inherit; border: 1px solid var(--vscode-widget-border, #333); border-radius: 6px;
     padding: 8px 9px; cursor: pointer; }
   .tile.on { border-color: var(--vscode-focusBorder, #3794ff); }
+  .flash { outline: 1px solid var(--vscode-focusBorder, #3794ff); border-radius: 4px; }
   .seedable { cursor: pointer; }
   .seedable:hover { border-color: var(--vscode-focusBorder, #3794ff); }
   .refresh, .search button, .row button { margin: 0 0 8px; padding: 5px 10px; cursor: pointer;
@@ -212,6 +214,7 @@ function shellHtml(data, tab, err) {
   ${STEP_CSS}
   ${MAP_CSS}
   ${DASH_CSS}
+  ${GRAPH_CSS}
 </style></head>
 <body>
   ${banner}
@@ -221,6 +224,22 @@ function shellHtml(data, tab, err) {
     const vscode = acquireVsCodeApi();
     document.querySelectorAll('[data-tab]').forEach((btn) => {
       btn.onclick = () => vscode.postMessage({ cmd: 'tab', tab: btn.dataset.tab });
+    });
+    // A zone on the graph opens its findings below (Map tab), or switches to the Map
+    // tab from the Dashboard. No round trip: the findings are already on the page.
+    document.querySelectorAll('.mgraph [data-zone]').forEach((g) => {
+      g.onclick = (e) => {
+        e.preventDefault();
+        const id = 'z-' + g.dataset.zone;
+        const inMap = g.closest('#map');
+        if (!inMap) { vscode.postMessage({ cmd: 'tab', tab: 'map' }); return; }
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.tagName === 'DETAILS') el.open = true;
+        el.scrollIntoView({ block: 'center' });
+        el.classList.add('flash');
+        setTimeout(() => el.classList.remove('flash'), 1200);
+      };
     });
     document.querySelectorAll('[data-id]').forEach((btn) => {
       btn.onclick = () => vscode.postMessage({ cmd: 'surface', id: btn.dataset.id });

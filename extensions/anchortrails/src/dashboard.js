@@ -12,6 +12,7 @@
  * Absent is a state: a folder with no map yet shows the buttons that make one.
  */
 const { runIndex, runMark, mapActions } = require('./plan');
+const { graphSvg } = require('./map_graph');
 
 // "symbol (marker, line N)" -- the planner's deliverable line. The line is what makes
 // the row a link into the code; a deliverable that does not carry one links nowhere.
@@ -217,6 +218,7 @@ function dashboardHtml(map, esc, focusTask) {
     <div class="chips">${chips.join('')}</div>
     ${objectiveLine}
     ${actions}
+    ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4 })}
     ${tiles}
     ${progress}
     ${taskList}
