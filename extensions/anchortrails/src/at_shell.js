@@ -225,21 +225,87 @@ function shellHtml(data, tab, err) {
     document.querySelectorAll('[data-tab]').forEach((btn) => {
       btn.onclick = () => vscode.postMessage({ cmd: 'tab', tab: btn.dataset.tab });
     });
-    // A zone on the graph opens its findings below (Map tab), or switches to the Map
-    // tab from the Dashboard. No round trip: the findings are already on the page.
-    document.querySelectorAll('.mgraph [data-zone]').forEach((g) => {
-      g.onclick = (e) => {
-        e.preventDefault();
-        const id = 'z-' + g.dataset.zone;
-        const inMap = g.closest('#map');
-        if (!inMap) { vscode.postMessage({ cmd: 'tab', tab: 'map' }); return; }
-        const el = document.getElementById(id);
-        if (!el) return;
-        if (el.tagName === 'DETAILS') el.open = true;
-        el.scrollIntoView({ block: 'center' });
-        el.classList.add('flash');
-        setTimeout(() => el.classList.remove('flash'), 1200);
+    // THE GRAPH IS A VIEWPORT. Wheel zooms about the cursor, drag pans, a click zooms
+    // to that node and names it in the caption, whose link opens the zone's findings
+    // below (Map tab) or switches to the Map tab (Dashboard). Full screen fixes the
+    // graph over the panel; Esc or the button brings it back. All on the viewBox.
+    const showZone = (slug) => {
+      const el = document.getElementById('z-' + slug);
+      if (!el) { vscode.postMessage({ cmd: 'tab', tab: 'map' }); return; }
+      if (el.tagName === 'DETAILS') el.open = true;
+      el.scrollIntoView({ block: 'center' });
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1200);
+    };
+    document.querySelectorAll('.mgraph').forEach((box) => {
+      const svg = box.querySelector('svg');
+      if (!svg) return;
+      const W = Number(box.dataset.w) || 560; const H = Number(box.dataset.h) || 300;
+      const caption = box.querySelector('.mcaption');
+      let vb = { x: 0, y: 0, w: W, h: H };
+      const apply = () => svg.setAttribute('viewBox', [vb.x, vb.y, vb.w, vb.h].map((n) => n.toFixed(2)).join(' '));
+      const reset = () => { vb = { x: 0, y: 0, w: W, h: H }; apply(); if (caption) caption.textContent = ''; };
+      const toSvg = (cx, cy) => {
+        const r = svg.getBoundingClientRect();
+        // xMidYMid meet: the drawing is letterboxed inside the element
+        const s = Math.min(r.width / vb.w, r.height / vb.h) || 1;
+        const ox = (r.width - vb.w * s) / 2; const oy = (r.height - vb.h * s) / 2;
+        return { x: vb.x + (cx - r.left - ox) / s, y: vb.y + (cy - r.top - oy) / s };
       };
+      const zoomAt = (px, py, factor) => {
+        const w = Math.max(W / 40, Math.min(W * 4, vb.w * factor)); const h = w * (H / W);
+        vb = { x: px - (px - vb.x) * (w / vb.w), y: py - (py - vb.y) * (h / vb.h), w, h };
+        apply();
+      };
+      svg.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const p = toSvg(e.clientX, e.clientY);
+        zoomAt(p.x, p.y, e.deltaY > 0 ? 1.18 : 1 / 1.18);
+      }, { passive: false });
+      let drag = null;
+      svg.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y, moved: false }; svg.classList.add('panning'); svg.setPointerCapture(e.pointerId); });
+      svg.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        const r = svg.getBoundingClientRect();
+        const s = Math.min(r.width / vb.w, r.height / vb.h) || 1;
+        const dx = (e.clientX - drag.x) / s; const dy = (e.clientY - drag.y) / s;
+        if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
+        vb.x = drag.vx - dx; vb.y = drag.vy - dy; apply();
+      });
+      const endDrag = () => { if (drag) { svg.classList.remove('panning'); } };
+      svg.addEventListener('pointerup', (e) => {
+        const wasDrag = drag && drag.moved; endDrag();
+        drag = null;
+        if (wasDrag) return;
+        const g = e.target.closest && e.target.closest('[data-zone]');
+        if (!g) return;
+        const c = g.querySelector('circle');
+        const cx = Number(c.getAttribute('cx')); const cy = Number(c.getAttribute('cy'));
+        // zoom to the node: a quarter of the map wide, centred on it
+        const w = W / 4; const h = H / 4;
+        vb = { x: cx - w / 2, y: cy - h / 2, w, h }; apply();
+        const t = g.querySelector('title');
+        if (caption) {
+          caption.textContent = t ? t.textContent : g.dataset.zone;
+          if (!g.classList.contains('grey')) {
+            const a = document.createElement('a'); a.href = '#'; a.textContent = 'findings ↓';
+            a.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); box.classList.remove('full'); showZone(g.dataset.zone); };
+            caption.appendChild(a);
+          }
+        }
+      });
+      svg.addEventListener('pointercancel', () => { endDrag(); drag = null; });
+      svg.addEventListener('dblclick', (e) => { e.preventDefault(); const g = e.target.closest && e.target.closest('[data-zone]'); if (g) { box.classList.remove('full'); showZone(g.dataset.zone); } });
+      box.querySelectorAll('[data-graph]').forEach((btn) => {
+        btn.onclick = (e) => {
+          e.preventDefault();
+          if (btn.dataset.graph === 'reset') reset();
+          if (btn.dataset.graph === 'full') { box.classList.toggle('full'); btn.textContent = box.classList.contains('full') ? '⤡ Exit full screen' : '⤢ Full screen'; }
+        };
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && box.classList.contains('full')) { box.classList.remove('full'); const b = box.querySelector('[data-graph="full"]'); if (b) b.textContent = '⤢ Full screen'; }
+      });
     });
     document.querySelectorAll('[data-id]').forEach((btn) => {
       btn.onclick = () => vscode.postMessage({ cmd: 'surface', id: btn.dataset.id });

@@ -70,6 +70,11 @@ describe('AT middle shell', () => {
     assert.match(dash, /data-cmd="chat" data-id="\/run"/);
     const map = shellHtml({ ...DATA, map: MAP }, 'map');
     assert.match(map, /id="map" class="pane on"/);
+    assert.match(map, /<div class="mgraph"/, 'the graphical map is on the Map tab');
+    assert.match(map, /svg\.addEventListener\('wheel'/, 'wheel zoom');
+    assert.match(map, /classList\.toggle\('full'\)/, 'full screen toggle');
+    assert.match(map, /e\.key === 'Escape'/, 'Esc leaves full screen');
+    assert.match(map, /\.mgraph\.full \{ position:fixed; inset:0;/);
     assert.match(map, /<section class="map"/);
     assert.match(map, /data-cmd="open-code" data-id="src\/a\.ts#7"/);
     const all = shellHtml({ ...DATA, map: MAP }, 'plan');

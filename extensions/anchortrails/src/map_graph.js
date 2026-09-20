@@ -124,12 +124,26 @@ function graphSvg(overview, esc, opts = {}) {
       + `<circle cx="${X(n.x)}" cy="${Y(n.y)}" r="${n.r.toFixed(1)}" fill="${n.fill}" stroke="#0f1218" stroke-width="0.8"/>${label}</g>`;
   }).join('');
   const legend = '<div class="mlegend"><i style="background:#4a5160"></i>not analysed <i style="background:#2f6b3a"></i>nothing found <i style="background:#8a7b28"></i>moderate <i style="background:#c2811f"></i>high <i style="background:#e2533f"></i>worst · size = flagged symbols · lines = calls and imports between zones</div>';
-  return `<div class="mgraph"><svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
+  // The controls are wired by the shell's script: full screen (Esc closes), reset the
+  // view, and the caption that names the node the view is zoomed on. Wheel zooms,
+  // drag pans, a click zooms to the node -- all on the viewBox, no library.
+  const tools = '<div class="mtools"><button type="button" data-graph="full" title="Full screen (Esc closes)">⤢ Full screen</button><button type="button" data-graph="reset" title="Fit the whole map">⟲ Fit</button><span class="mcaption"></span></div>';
+  return `<div class="mgraph" data-w="${W}" data-h="${H}">${tools}<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
 }
 
 const GRAPH_CSS = `
-  .mgraph { margin:6px 0 8px; background:#0f1218; border:1px solid var(--vscode-widget-border,#333); border-radius:6px; padding:4px; }
-  .mgraph svg { display:block; max-height:340px; }
+  .mgraph { margin:6px 0 8px; background:#0f1218; border:1px solid var(--vscode-widget-border,#333); border-radius:6px; padding:4px; position:relative; }
+  .mgraph svg { display:block; max-height:340px; cursor:grab; touch-action:none; }
+  .mgraph svg.panning { cursor:grabbing; }
+  .mgraph .mtools { display:flex; gap:6px; align-items:center; font-size:10.5px; padding:0 2px 4px; }
+  .mgraph .mtools button { background:#1b2130; color:#cfd6e4; border:1px solid #2b3345; border-radius:4px; padding:2px 7px; cursor:pointer; font-size:10.5px; }
+  .mgraph .mtools button:hover { border-color:#3794ff; }
+  .mgraph .mcaption { opacity:.8; margin-left:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mgraph .mcaption a { color:#7fd3b9; margin-left:6px; }
+  .mgraph.full { position:fixed; inset:0; z-index:50; margin:0; border:0; border-radius:0; padding:8px; display:flex; flex-direction:column; }
+  .mgraph.full svg { flex:1; max-height:none; height:auto; min-height:0; }
+  .mgraph.full .mtools { font-size:12px; } .mgraph.full .mtools button { font-size:12px; padding:4px 10px; }
+  .mgraph.full .mlegend { font-size:11.5px; }
   .mgraph .mnode { cursor:pointer; } .mgraph .mnode:hover circle { stroke:#fff; stroke-width:1.4; }
   .mgraph .mlegend { font-size:10.5px; opacity:.7; padding:4px 4px 2px; }
   .mgraph .mlegend i { display:inline-block; width:9px; height:9px; border-radius:50%; margin:0 3px 0 8px; vertical-align:middle; }

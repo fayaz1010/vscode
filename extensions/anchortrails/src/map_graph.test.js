@@ -48,6 +48,8 @@ describe('the graphical map', () => {
     assert.match(svg, /fill="#e2533f"/); assert.match(svg, /fill="#2f6b3a"/); assert.match(svg, /fill="#4a5160"/);
     assert.match(svg, /<text [^>]*>src\/a<\/text>/, 'analysed zones are labelled');
     assert.match(svg, /class="mlegend"/);
+    assert.match(svg, /<div class="mgraph" data-w="560" data-h="300"><div class="mtools"><button type="button" data-graph="full"[^>]*>⤢ Full screen<\/button><button type="button" data-graph="reset"/, 'full screen and fit controls, wired by the shell');
+    assert.match(svg, /<span class="mcaption"><\/span>/);
     assert.equal(graphSvg({ zones: [] }, esc), '', 'no zones: nothing to draw');
     assert.doesNotMatch(graphSvg(OV, esc, { legend: false, height: 220 }), /mlegend/);
     assert.match(graphSvg(OV, esc, { height: 220 }), /viewBox="0 0 560 220"/);

@@ -217,7 +217,7 @@ describe('the map is of the repository: grey where unread, green where clean', (
     assert.match(html, /46 of 14,197 files read/);
     assert.match(html, /<b>extensions\/anchortrails\/src<\/b>/, 'a flagged zone, coloured');
     assert.match(html, /class="mclean"[^>]*><span class="mdot" style="background:#3fb950"><\/span><b>extensions\/anchortrails\/test<\/b><span class="muted"> · 6 files · nothing found/, 'analysed and clean: green, said once');
-    assert.match(html, /<div class="mgraph"><svg /, 'the graphical map sits above the zone list');
+    assert.match(html, /<div class="mgraph" data-w="560"/, 'the graphical map sits above the zone list');
     assert.match(html, /not analysed yet · 2 zones · 9,151 files · 1 queued/, 'the unread part, in one line');
     assert.match(html, /<b>src<\/b><span class="muted"> · 1 zone · 9,000 files/, 'grouped under its top-level directory');
     assert.match(html, /class="mgrey queued"><span class="mdot"><\/span>extensions\/git<span class="muted"> · 151 · in focus, not read/);
