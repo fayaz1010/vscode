@@ -211,3 +211,16 @@ describe('desktop_run_command is a first-class tool, not buried behind meta_invo
     assert.deepEqual(spec.inputSchema.required, ['command']);
   });
 });
+
+describe('browser_skill_replay schema matches the real backend', () => {
+  it('declares task (required), not the query/name pair that never validated', () => {
+    // The first live tool-loop run called it with {query: ...} and got back
+    // "1 validation error for SkillReplayInput: task Field required".
+    const { DEST_ALWAYS } = require('./tools');
+    const spec = DEST_ALWAYS.find((t) => t.name === 'browser_skill_replay');
+    assert.ok(spec);
+    assert.equal(spec.inputSchema.properties.query, undefined);
+    assert.equal(spec.inputSchema.properties.task.type, 'string');
+    assert.deepEqual(spec.inputSchema.required, ['task']);
+  });
+});

@@ -655,7 +655,7 @@ describe('the tool loop', () => {
     assert.equal(second[2].content[0].callId, 'c1');
     assert.match(second[2].content[0].content[0].value, /"count":7/);
     const all = response.parts.join('');
-    assert.match(all, /`desktop_uia_find` \{"query":"claude"\} → \{"count":7/);
+    assert.match(all, /\*desktop_uia_find \{"query":"claude"\} → 7 matches\*/);
     assert.match(all, /Found Claude on the taskbar\.$/);
   });
 
@@ -706,10 +706,92 @@ describe('the tool loop', () => {
     assert.deepEqual(response.parts, ['just an answer']);
   });
 
-  it('ledger lines clip long input and results', () => {
+  it('ledger lines are one short italic line, summarised, never a JSON dump', () => {
     const line = ledgerLine({ name: 'desktop_uia_find', input: { q: 'x'.repeat(500) } }, 'y'.repeat(500));
-    assert.ok(line.length < 400);
-    assert.match(line, /^\n\n`desktop_uia_find` /);
+    assert.ok(line.length < 200);
+    assert.match(line, /^\n\n\*desktop_uia_find /);
     assert.match(line, /…/);
+    assert.match(ledgerLine({ name: 'desktop_uia_find', input: {} }, '{"count":7,"matches":[]}'), /→ 7 matches\*$/);
+    assert.match(ledgerLine({ name: 'desktop_map', input: {} }, '{"ok":true,"front":{}}'), /→ ok\*$/);
+    assert.match(ledgerLine({ name: 'desktop_go', input: {} }, '{"denied":true}'), /→ not approved\*$/);
+    assert.match(ledgerLine({ name: 'x', input: {} }, '{"error":"invalid input: 1 validation error\\nmore"}'), /→ error: invalid input: 1 validation error\*$/);
+    assert.match(ledgerLine({ name: 'desktop_run_command', input: {} }, '{"exit_code":0,"stdout":"hi\\n"}'), /→ exit 0: hi\*$/);
+  });
+
+  it('approval_required pauses for the person, then re-invokes with approve=true', async () => {
+    // Live: the loop found the taskbar button first try, then stalled on
+    // three approval_required results -- nothing could answer them.
+    const { invokeTool, APPROVE_ONE, APPROVE_TURN } = require('./participant');
+    const invoked = [];
+    const prompts = [];
+    const mk = (answer) => ({
+      lm: {
+        async invokeTool(name, opts) {
+          invoked.push({ name, input: opts.input });
+          if (!opts.input.approve) return { content: [{ value: '{"approval_required":true,"tool":"desktop_go"}' }] };
+          return { content: [{ value: '{"ok":true,"clicked":"Claude"}' }] };
+        },
+      },
+      window: { async showWarningMessage(msg, opts, ...buttons) { prompts.push({ msg, opts, buttons }); return answer; } },
+    });
+    const call = { callId: 'c1', name: 'desktop_go', input: { text: 'Claude' } };
+    const state = {};
+    const out = await invokeTool(mk(APPROVE_ONE), {}, call, undefined, state);
+    assert.match(out, /"clicked":"Claude"/);
+    assert.equal(invoked.length, 2);
+    assert.deepEqual(invoked[1].input, { text: 'Claude', approve: true });
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0].msg, /desktop_go/);
+    assert.equal(prompts[0].opts.modal, true);
+    assert.deepEqual(prompts[0].buttons, [APPROVE_ONE, APPROVE_TURN]);
+    assert.equal(state.approveAll, undefined);
+  });
+
+  it('"Approve all this turn" answers the next approval without asking again', async () => {
+    const { invokeTool, APPROVE_TURN } = require('./participant');
+    let asked = 0;
+    const vscode = {
+      lm: {
+        async invokeTool(name, opts) {
+          if (!opts.input.approve) return { content: [{ value: '{"approval_required":true}' }] };
+          return { content: [{ value: '{"ok":true}' }] };
+        },
+      },
+      window: { async showWarningMessage() { asked += 1; return APPROVE_TURN; } },
+    };
+    const state = {};
+    await invokeTool(vscode, {}, { callId: 'a', name: 'desktop_go', input: {} }, undefined, state);
+    await invokeTool(vscode, {}, { callId: 'b', name: 'desktop_look_click', input: {} }, undefined, state);
+    assert.equal(asked, 1);
+    assert.equal(state.approveAll, true);
+  });
+
+  it('a dismissed prompt is a denial the model can see, and nothing is re-invoked', async () => {
+    const { invokeTool } = require('./participant');
+    const invoked = [];
+    const vscode = {
+      lm: {
+        async invokeTool(name, opts) {
+          invoked.push(opts.input);
+          return { content: [{ value: '{"approval_required":true}' }] };
+        },
+      },
+      window: { async showWarningMessage() { return undefined; } },
+    };
+    const out = await invokeTool(vscode, {}, { callId: 'a', name: 'desktop_go', input: { i: 0 } }, undefined, {});
+    assert.match(out, /"denied":true/);
+    assert.equal(invoked.length, 1);
+  });
+
+  it('a non-mutating result never prompts', async () => {
+    const { invokeTool } = require('./participant');
+    let asked = 0;
+    const vscode = {
+      lm: { async invokeTool() { return { content: [{ value: '{"count":7}' }] }; } },
+      window: { async showWarningMessage() { asked += 1; return 'Approve'; } },
+    };
+    const out = await invokeTool(vscode, {}, { callId: 'a', name: 'desktop_uia_find', input: {} }, undefined, {});
+    assert.equal(out, '{"count":7}');
+    assert.equal(asked, 0);
   });
 });

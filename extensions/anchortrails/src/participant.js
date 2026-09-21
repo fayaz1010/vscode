@@ -260,7 +260,10 @@ function friendlyProgress(turn) {
 // email tool + read it. Each round is one model request; the model ends the
 // loop itself by answering without a call.
 const MAX_TOOL_ROUNDS = 24;
-const LEDGER_CLIP = 160;
+// Short on purpose: a person reads this, not a log parser. The first live
+// run printed 160-char JSON dumps per call and read as "a lot of streams".
+const ARGS_CLIP = 60;
+const RESULT_CLIP = 90;
 
 function clip(s, n) {
   const str = String(s == null ? '' : s);
@@ -310,20 +313,70 @@ function toolResultText(result) {
   }
 }
 
-async function invokeTool(vscode, request, call, token) {
+async function invokeOnce(vscode, request, name, input, token) {
   const lm = vscode && vscode.lm;
   if (!lm || typeof lm.invokeTool !== 'function') {
-    return JSON.stringify({ error: `tool ${call.name} is not invokable in this host` });
+    return JSON.stringify({ error: `tool ${name} is not invokable in this host` });
   }
   try {
-    const result = await lm.invokeTool(call.name, {
-      input: call.input,
+    const result = await lm.invokeTool(name, {
+      input,
       toolInvocationToken: request && request.toolInvocationToken,
     }, token);
     return toolResultText(result);
   } catch (err) {
     return JSON.stringify({ error: String((err && err.message) || err) });
   }
+}
+
+function approvalRequired(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return Boolean(parsed && parsed.approval_required);
+  } catch {
+    return false;
+  }
+}
+
+const APPROVE_ONE = 'Approve';
+const APPROVE_TURN = 'Approve all this turn';
+
+// The bridge pauses every mutating tool (a click, a keystroke, a shell
+// command) and hands back approval_required. Before this, the only thing
+// that could answer was the model itself, by setting approve=true -- so
+// either it self-approved, or it stopped and told the user to "confirm",
+// with nothing to click. Live: a launch that found the taskbar button on
+// the first try then stalled on three approval_required results in a row.
+// The person is the one who confirms: a modal with the tool name and its
+// input, one click per action or one for the whole turn.
+async function confirmWithUser(vscode, state, call) {
+  if (state.approveAll) return true;
+  const win = vscode && vscode.window;
+  if (!win || typeof win.showWarningMessage !== 'function') return false;
+  let args = '';
+  try { args = JSON.stringify(call.input || {}); } catch { args = ''; }
+  const picked = await win.showWarningMessage(
+    `AnchorTrails wants to run ${call.name}`,
+    { modal: true, detail: clip(args, 400) },
+    APPROVE_ONE,
+    APPROVE_TURN,
+  );
+  if (picked === APPROVE_TURN) state.approveAll = true;
+  return picked === APPROVE_ONE || picked === APPROVE_TURN;
+}
+
+async function invokeTool(vscode, request, call, token, state = {}) {
+  const first = await invokeOnce(vscode, request, call.name, call.input, token);
+  if (!approvalRequired(first)) return first;
+  const ok = await confirmWithUser(vscode, state, call);
+  if (!ok) {
+    return JSON.stringify({
+      denied: true,
+      tool: call.name,
+      hint: 'the user did not approve this action; do not retry it, say what was not done',
+    });
+  }
+  return invokeOnce(vscode, request, call.name, { ...(call.input || {}), approve: true }, token);
 }
 
 // Real part classes when the host has them: the extension host converts
@@ -346,10 +399,28 @@ function mkResult(vscode, callId, text) {
 
 // One honest line per REAL call: name, clipped input, clipped result. This
 // is the only ledger the chat prints now; the model cannot author it.
+function ledgerSummary(text) {
+  try {
+    const p = JSON.parse(text);
+    if (p && typeof p === 'object') {
+      if (p.denied) return 'not approved';
+      if (p.approval_required) return 'waiting for approval';
+      if (p.error) return `error: ${clip(String(p.error).split('\n')[0], RESULT_CLIP)}`;
+      if (typeof p.count === 'number') return `${p.count} match${p.count === 1 ? '' : 'es'}`;
+      if (typeof p.match_count === 'number') return `${p.match_count} match${p.match_count === 1 ? '' : 'es'}`;
+      if (typeof p.exit_code === 'number') return `exit ${p.exit_code}${p.stdout ? `: ${clip(String(p.stdout).trim(), RESULT_CLIP)}` : ''}`;
+      if (p.ok === true) return 'ok';
+      if (p.ok === false) return `failed${p.reason ? `: ${clip(String(p.reason), RESULT_CLIP)}` : ''}`;
+    }
+  } catch { /* not JSON */ }
+  return clip(String(text).replace(/\s+/g, ' ').trim(), RESULT_CLIP);
+}
+
 function ledgerLine(call, text) {
   let args = '';
   try { args = JSON.stringify(call.input || {}); } catch { args = ''; }
-  return `\n\n\`${call.name}\` ${clip(args, LEDGER_CLIP)} → ${clip(text, LEDGER_CLIP)}`;
+  const shown = args === '{}' ? '' : ` ${clip(args, ARGS_CLIP)}`;
+  return `\n\n*${call.name}${shown} → ${ledgerSummary(text)}*`;
 }
 
 async function runModelRound({
@@ -379,11 +450,14 @@ async function runModelRound({
   const messages = [...(turn.messages || [])];
   let wroteAny = false;
   let toolRounds = 0;
+  const approvals = {};
+  // One progress line for the whole round. A progress() per call made the
+  // chat collapse each ledger line into its own "Finished with 1 step" group.
+  if (response && typeof response.progress === 'function') {
+    response.progress('complete…');
+  }
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
     if (token && token.isCancellationRequested) return { cancelled: true };
-    if (response && typeof response.progress === 'function') {
-      response.progress(round === 0 ? 'complete…' : 'thinking…');
-    }
     const sent = await model.sendRequest(
       toVscodeMessages(vscode, messages),
       requestOptions(turn, bound),
@@ -403,10 +477,7 @@ async function runModelRound({
     const resultParts = [];
     for (const call of read.calls) {
       if (token && token.isCancellationRequested) return { cancelled: true };
-      if (response && typeof response.progress === 'function') {
-        response.progress(`${call.name}…`);
-      }
-      const text = await invokeTool(vscode, request, call, token);
+      const text = await invokeTool(vscode, request, call, token, approvals);
       response.markdown(ledgerLine(call, text));
       wroteAny = true;
       resultParts.push(mkResult(vscode, call.callId, text));
@@ -666,4 +737,7 @@ module.exports = {
   readResponse,
   isToolCallPart,
   ledgerLine,
+  invokeTool,
+  APPROVE_ONE,
+  APPROVE_TURN,
 };

@@ -53,8 +53,19 @@ const DEST_ALWAYS = [
   },
   {
     name: 'browser_skill_replay',
+    // First live tool-loop run called this with {query: ...} and got a real
+    // validation error back: the backend (tools/browser/flight_recorder.py
+    // SkillReplayInput) takes `task`, not `query`/`name`.
     description: 'Replay a saved page flow before remapping.',
-    inputSchema: { type: 'object', properties: { name: { type: 'string' }, query: { type: 'string' } } },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'What you want done; matched against saved skills.' },
+        params: { type: 'object', description: 'Values for the skill\'s {{placeholders}}.' },
+        app: { type: 'string', description: 'Optional host to scope the match, e.g. "ads.google.com".' },
+      },
+      required: ['task'],
+    },
   },
   {
     name: 'browser_fill_editor',
