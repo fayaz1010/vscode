@@ -716,6 +716,12 @@ describe('the tool loop', () => {
     assert.match(ledgerLine({ name: 'desktop_go', input: {} }, '{"denied":true}'), /→ not approved\*$/);
     assert.match(ledgerLine({ name: 'x', input: {} }, '{"error":"invalid input: 1 validation error\\nmore"}'), /→ error: invalid input: 1 validation error\*$/);
     assert.match(ledgerLine({ name: 'desktop_run_command', input: {} }, '{"exit_code":0,"stdout":"hi\\n"}'), /→ exit 0: hi\*$/);
+    // Live: Get-StartApps stdout spanned lines and the *…* emphasis broke,
+    // printing literal asterisks; a timed-out command fell back to raw JSON.
+    const multi = ledgerLine({ name: 'desktop_run_command', input: {} }, '{"exit_code":0,"stdout":"Name : Claude\\nAppID : com.x\\n\\nName : Other"}');
+    assert.ok(!multi.slice(2).includes('\n'), 'summary must stay on one line');
+    assert.match(multi, /→ exit 0: Name : Claude AppID : com\.x Name : Other\*$/);
+    assert.match(ledgerLine({ name: 'desktop_run_command', input: {} }, '{"command":"x","exit_code":null,"timed_out":true}'), /→ timed out\*$/);
   });
 
   it('approval_required pauses for the person, then re-invokes with approve=true', async () => {

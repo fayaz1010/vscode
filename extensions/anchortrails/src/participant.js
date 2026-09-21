@@ -399,21 +399,28 @@ function mkResult(vscode, callId, text) {
 
 // One honest line per REAL call: name, clipped input, clipped result. This
 // is the only ledger the chat prints now; the model cannot author it.
+// One line, always: the summary sits inside *…* and markdown emphasis
+// cannot span a newline, so a multi-line stdout printed literal asterisks.
+function oneLine(s, n) {
+  return clip(String(s == null ? '' : s).replace(/\s+/g, ' ').trim(), n);
+}
+
 function ledgerSummary(text) {
   try {
     const p = JSON.parse(text);
     if (p && typeof p === 'object') {
       if (p.denied) return 'not approved';
       if (p.approval_required) return 'waiting for approval';
-      if (p.error) return `error: ${clip(String(p.error).split('\n')[0], RESULT_CLIP)}`;
+      if (p.error) return `error: ${oneLine(String(p.error).split('\n')[0], RESULT_CLIP)}`;
       if (typeof p.count === 'number') return `${p.count} match${p.count === 1 ? '' : 'es'}`;
       if (typeof p.match_count === 'number') return `${p.match_count} match${p.match_count === 1 ? '' : 'es'}`;
-      if (typeof p.exit_code === 'number') return `exit ${p.exit_code}${p.stdout ? `: ${clip(String(p.stdout).trim(), RESULT_CLIP)}` : ''}`;
+      if (p.timed_out === true) return 'timed out';
+      if (typeof p.exit_code === 'number') return `exit ${p.exit_code}${p.stdout ? `: ${oneLine(p.stdout, RESULT_CLIP)}` : ''}`;
       if (p.ok === true) return 'ok';
-      if (p.ok === false) return `failed${p.reason ? `: ${clip(String(p.reason), RESULT_CLIP)}` : ''}`;
+      if (p.ok === false) return `failed${p.reason ? `: ${oneLine(p.reason, RESULT_CLIP)}` : ''}`;
     }
   } catch { /* not JSON */ }
-  return clip(String(text).replace(/\s+/g, ' ').trim(), RESULT_CLIP);
+  return oneLine(text, RESULT_CLIP);
 }
 
 function ledgerLine(call, text) {
