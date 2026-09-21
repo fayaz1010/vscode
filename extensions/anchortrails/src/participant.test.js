@@ -789,7 +789,8 @@ describe('the tool loop', () => {
     assert.equal(invoked.length, 2);
     assert.deepEqual(invoked[1].input, { text: 'Claude', approve: true });
     assert.equal(prompts.length, 1);
-    assert.match(prompts[0].msg, /desktop_go/);
+    assert.match(prompts[0].msg, /wants to click "Claude"/);
+    assert.match(prompts[0].opts.detail, /desktop_go/);
     assert.equal(prompts[0].opts.modal, true);
     assert.deepEqual(prompts[0].buttons, [APPROVE_ONE, APPROVE_TURN]);
     assert.equal(state.approveAll, undefined);
@@ -829,6 +830,26 @@ describe('the tool loop', () => {
     const out = await invokeTool(vscode, {}, { callId: 'a', name: 'desktop_go', input: { i: 0 } }, undefined, {});
     assert.match(out, /"denied":true/);
     assert.equal(invoked.length, 1);
+  });
+
+  it('the approval modal is plain words, with the raw command underneath', () => {
+    // "approval dialog was full of syntax": v1 put the input JSON in the title.
+    const { approvalText, plainCommand } = require('./participant');
+    const run = approvalText({ name: 'desktop_run_command', input: { command: 'powershell -NoProfile -Command "$a = Get-StartApps | Where-Object Name -eq Claude; Start-Process shell:AppsFolder\\$($a.AppID)"' } });
+    assert.equal(run.message, 'AnchorTrails wants to run a command on this computer');
+    assert.match(run.detail, /^Command: \$a = Get-StartApps \| Where-Object Name -eq Claude; Start-Process shell:AppsFolder/);
+    assert.ok(!run.detail.includes('powershell -NoProfile'), 'the wrapper is noise to a person');
+    assert.ok(!run.message.includes('{'), 'no JSON in the title');
+    assert.equal(plainCommand({ command: 'where.exe claude' }), 'where.exe claude');
+    const click = approvalText({ name: 'desktop_look_click', input: { text: 'Claude Desktop (plain)' } });
+    assert.equal(click.message, 'AnchorTrails wants to click "Claude Desktop (plain)"');
+    const go = approvalText({ name: 'desktop_go', input: { i: 0, task: 'launch' } });
+    assert.equal(go.message, 'AnchorTrails wants to click "item 0"');
+    const fill = approvalText({ name: 'browser_fill_editor', input: { text: 'hello' } });
+    assert.equal(fill.message, 'AnchorTrails wants to type into a field');
+    const nav = approvalText({ name: 'browser_navigate', input: { url: 'https://example.com/form' } });
+    assert.equal(nav.message, 'AnchorTrails wants to act in the browser');
+    assert.match(nav.detail, /example\.com\/form/);
   });
 
   it('a non-mutating result never prompts', async () => {

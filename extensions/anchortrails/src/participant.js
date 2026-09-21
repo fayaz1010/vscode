@@ -351,15 +351,47 @@ const APPROVE_TURN = 'Approve all this turn';
 // the first try then stalled on three approval_required results in a row.
 // The person is the one who confirms: a modal with the tool name and its
 // input, one click per action or one for the whole turn.
+// Plain words in the modal, the raw command underneath. The first version
+// put the whole input JSON in the title -- "full of syntax" to the person
+// who has to click it.
+const SHELL_WRAP = /^\s*(?:powershell(?:\.exe)?|pwsh)\s+(?:-\w+\s+)*-c(?:ommand)?\s+"?([\s\S]*?)"?\s*$/i;
+
+function plainCommand(input) {
+  const raw = String((input && input.command) || '').trim();
+  const m = raw.match(SHELL_WRAP);
+  return (m ? m[1] : raw).replace(/\s+/g, ' ').trim();
+}
+
+function approvalText(call) {
+  const input = call.input || {};
+  const name = String(call.name || '');
+  const target = input.text || input.label || input.name
+    || (input.selector && input.selector.name) || (input.i != null ? `item ${input.i}` : '');
+  if (name === 'desktop_run_command' || name === 'runInTerminal') {
+    return { message: 'AnchorTrails wants to run a command on this computer', detail: `Command: ${clip(plainCommand(input), 300)}` };
+  }
+  if (/click|go$|invoke|press|tap/.test(name)) {
+    return { message: `AnchorTrails wants to click${target ? ` "${clip(target, 60)}"` : ''}`, detail: `Tool: ${name}` };
+  }
+  if (/type|fill|set_value|paste|keys/.test(name)) {
+    return { message: 'AnchorTrails wants to type into a field', detail: `Tool: ${name}${target ? ` — ${clip(target, 60)}` : ''}` };
+  }
+  if (/^browser_/.test(name)) {
+    return { message: 'AnchorTrails wants to act in the browser', detail: `Tool: ${name}${input.url ? ` — ${clip(input.url, 120)}` : ''}` };
+  }
+  let args = '';
+  try { args = JSON.stringify(input); } catch { args = ''; }
+  return { message: `AnchorTrails wants to run ${name}`, detail: clip(args, 300) };
+}
+
 async function confirmWithUser(vscode, state, call) {
   if (state.approveAll) return true;
   const win = vscode && vscode.window;
   if (!win || typeof win.showWarningMessage !== 'function') return false;
-  let args = '';
-  try { args = JSON.stringify(call.input || {}); } catch { args = ''; }
+  const { message, detail } = approvalText(call);
   const picked = await win.showWarningMessage(
-    `AnchorTrails wants to run ${call.name}`,
-    { modal: true, detail: clip(args, 400) },
+    message,
+    { modal: true, detail },
     APPROVE_ONE,
     APPROVE_TURN,
   );
@@ -762,6 +794,8 @@ module.exports = {
   isToolCallPart,
   ledgerLine,
   invokeTool,
+  approvalText,
+  plainCommand,
   APPROVE_ONE,
   APPROVE_TURN,
 };
