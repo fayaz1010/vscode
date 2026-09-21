@@ -69,6 +69,8 @@ function runTotals(run) {
     failed: n('failed'),
     skipped: n('skipped_dirty', 'blocked'),
     cost: run && run.cost_usd != null ? Number(run.cost_usd) : null,
+    costAll: run && run.cost_all_runs_usd != null ? Number(run.cost_all_runs_usd) : null,
+    models: run && Array.isArray(run.models) ? run.models : [],
     seconds: run && run.seconds != null ? Number(run.seconds) : null,
     status: (run && run.status) || '',
     dry: Boolean(run && run.dry_run),
@@ -76,6 +78,20 @@ function runTotals(run) {
 }
 
 function money(v) { return v == null ? '—' : `$${Number(v).toFixed(2)}`; }
+function shortModel(m) { return String(m || '?').replace(/^[^/]+\//, ''); }
+function tokens(n) {
+  n = Number(n || 0);
+  return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)}k` : String(n);
+}
+
+// WHO WAS PAID. One row per model the run called: calls, tokens in and out, cost —
+// the "who" and "how much text" beside the run's dollar figure. The rows come from
+// run.json's `models` (repo-dash sums every paid call, implementer and reviewer).
+function modelsHtml(models, escape) {
+  if (!Array.isArray(models) || !models.length) return '';
+  const rows = models.map((m) => `<tr><td>${escape(shortModel(m.model))}</td><td class="n">${Number(m.calls || 0)}</td><td class="n">${escape(tokens(m.tokens_in))}</td><td class="n">${escape(tokens(m.tokens_out))}</td><td class="n">${escape(money(m.cost_usd))}</td></tr>`).join('');
+  return `<table class="dmodels"><thead><tr><th>model</th><th class="n">calls</th><th class="n">in</th><th class="n">out</th><th class="n">cost</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function clock(s) {
   if (s == null) return '—';
   const n = Math.round(Number(s));
@@ -140,9 +156,11 @@ function dashboardHtml(map, esc, focusTask) {
     ${tile(String(tasks.length), 'planned tasks')}
     ${tile(String(tot.closed), 'closed', tot.closed ? 'good' : '')}
     ${tile(String(tot.failed), 'failed', tot.failed ? 'bad' : '')}
-    ${tile(escape(money(tot.cost)), 'run cost')}
+    ${tile(escape(money(tot.cost)), 'this run')}
+    ${tot.costAll != null ? tile(escape(money(tot.costAll)), 'all runs') : ''}
     ${tile(escape(clock(tot.seconds)), 'run time')}
   </div>`;
+  const modelTable = modelsHtml(tot.models, escape);
 
   // PROGRESS. Closed / failed / rest of the plan, as one bar.
   const denom = Math.max(tasks.length, tot.results, 1);
@@ -201,8 +219,11 @@ function dashboardHtml(map, esc, focusTask) {
     }).join('');
     const b = (t.execution && t.execution.budgets) || {};
     const budget = [b.max_cost_usd != null ? money(b.max_cost_usd) : '', b.max_runtime_seconds != null ? clock(b.max_runtime_seconds) : '', b.max_attempts ? `${b.max_attempts} tries` : ''].filter(Boolean).join(' · ');
+    const who = r && Array.isArray(r.calls) && r.calls.length
+      ? [...new Set(r.calls.map((c) => shortModel(c.model)))].join(', ')
+      : '';
     const said = r
-      ? [st.label, r.attempts ? `${r.attempts} attempt${r.attempts === 1 ? '' : 's'}` : '', r.cost_usd != null ? money(r.cost_usd) : '', st.why].filter(Boolean).join(' · ')
+      ? [st.label, r.attempts ? `${r.attempts} attempt${r.attempts === 1 ? '' : 's'}` : '', r.cost_usd != null ? money(r.cost_usd) : '', who, st.why].filter(Boolean).join(' · ')
       : (map.running ? 'waiting' : 'not run');
     const cls = `dtask${st.mark ? ` m-${(r && r.outcome) || ''}` : ''}${focusTask && focusTask === t.id ? ' on' : ''}`;
     return `<div class="${cls}" data-task="${escape(t.id)}">
@@ -224,6 +245,7 @@ function dashboardHtml(map, esc, focusTask) {
     ${actions}
     ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4 })}
     ${tiles}
+    ${modelTable}
     ${progress}
     ${taskList}
     ${markerList}
@@ -241,6 +263,9 @@ const DASH_CSS = `
   .dash .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(96px, 1fr)); gap:6px; margin:8px 0; }
   .dash .tiles .tile { cursor:default; } .dash .tiles .num { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
   .dash .tiles .num small, .dash .dnum small { font-size:11px; font-weight:400; opacity:.65; }
+  .dash .dmodels { border-collapse:collapse; margin:4px 0 8px; font-size:12px; font-variant-numeric:tabular-nums; }
+  .dash .dmodels th { text-align:left; font-weight:400; opacity:.65; padding:2px 10px 2px 0; }
+  .dash .dmodels td { padding:2px 10px 2px 0; } .dash .dmodels .n { text-align:right; }
   .dash .tile.good .num { color:#9ff0cf; } .dash .tile.bad .num { color:#f0a09f; }
   .dash .bar { display:flex; height:6px; border-radius:3px; background:#55555555; overflow:hidden; margin:0 0 10px; }
   .dash .seg { display:block; height:100%; } .dash .seg.good { background:#4fbf9a; } .dash .seg.bad { background:#e2533f; }
@@ -262,4 +287,4 @@ const DASH_CSS = `
   .dash.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }
 `;
 
-module.exports = { dashboardHtml, DASH_CSS, markerRows, runTotals, parseDeliverable, taskPath };
+module.exports = { dashboardHtml, DASH_CSS, markerRows, runTotals, parseDeliverable, taskPath, modelsHtml, tokens };

@@ -54,7 +54,7 @@ describe('Dashboard tab', () => {
     assert.match(html, /<div class="num">3<\/div><div class="meta">planned tasks/);
     assert.match(html, /tile good"><div class="num">1<\/div><div class="meta">closed/);
     assert.match(html, /tile bad"><div class="num">1<\/div><div class="meta">failed/);
-    assert.match(html, /\$0\.02<\/div><div class="meta">run cost/);
+    assert.match(html, /\$0\.02<\/div><div class="meta">this run/);
     assert.match(html, /11 min<\/div><div class="meta">run time/);
     assert.match(html, /class="bar" title="1 closed · 1 failed · 1 open"/);
     assert.match(html, /seg good" style="width:33%"/);
@@ -129,13 +129,58 @@ describe('Dashboard tab', () => {
     assert.equal(taskPath({ execution: { write_scope: ['a/b.js'] } }), 'a/b.js');
     assert.equal(taskPath({ title: 'a/c.js: implement the declared behaviour' }), 'a/c.js');
     assert.equal(taskPath({}), '');
-    assert.deepEqual(runTotals(MAP.run), { results: 2, closed: 1, failed: 1, skipped: 0, cost: 0.0165, seconds: 640, status: 'running', dry: false });
-    assert.deepEqual(runTotals(null), { results: 0, closed: 0, failed: 0, skipped: 0, cost: null, seconds: null, status: '', dry: false });
+    assert.deepEqual(runTotals(MAP.run), { results: 2, closed: 1, failed: 1, skipped: 0, cost: 0.0165, costAll: null, models: [], seconds: 640, status: 'running', dry: false });
+    assert.deepEqual(runTotals(null), { results: 0, closed: 0, failed: 0, skipped: 0, cost: null, costAll: null, models: [], seconds: null, status: '', dry: false });
     const rows = markerRows(MAP.overview);
     assert.deepEqual(rows.map((r) => [r.name, r.actionable, r.total, r.tier]), [
       ['bus_factor', 3, 3, 'C'], ['config_orphan', 1, 1, 'B'], ['stub_body', 0, 16, 'A'], ['todo_debt', 0, 1, ''],
     ]);
     // no zone counts: fall back to the overview's marker counts
     assert.deepEqual(markerRows({ meta: { markers: { stub_body: { tier: 'A', count: 2 }, hotspot: { tier: 'C', count: 0 } } }, zones: [] }).map((r) => r.name), ['stub_body']);
+  });
+});
+
+describe('Who was paid', () => {
+  const { modelsHtml, tokens } = require('./dashboard');
+  const withModels = {
+    ...MAP,
+    run: {
+      ...MAP.run, cost_usd: 0.1913, cost_all_runs_usd: 1.62,
+      models: [
+        { model: 'x-ai/grok-4.6', calls: 3, tokens_in: 41200, tokens_out: 9800, cost_usd: 0.1522 },
+        { model: 'typesafe/jev-1.13', calls: 4, tokens_in: 2100, tokens_out: 0, cost_usd: 0.0021 },
+      ],
+      results: [
+        { task: 't.ext-src-bridge.js', outcome: 'closed', attempts: 1, cost_usd: 0.15,
+          calls: [{ kind: 'implement', model: 'x-ai/grok-4.6' }, { kind: 'review', model: 'typesafe/jev-1.13' }] },
+      ],
+    },
+  };
+
+  it('shows this run beside all runs, so $0.19 is not mistaken for the project total', () => {
+    const html = dashboardHtml(withModels, esc);
+    assert.match(html, /\$0\.19<\/div><div class="meta">this run/);
+    assert.match(html, /\$1\.62<\/div><div class="meta">all runs/);
+  });
+
+  it('lists each model with calls, tokens in and out, and cost', () => {
+    const html = dashboardHtml(withModels, esc);
+    assert.match(html, /<td>grok-4\.6<\/td><td class="n">3<\/td><td class="n">41\.2k<\/td><td class="n">9\.8k<\/td><td class="n">\$0\.15<\/td>/);
+    assert.match(html, /<td>jev-1\.13<\/td><td class="n">4<\/td>/);
+  });
+
+  it('names the models on the task row', () => {
+    const html = dashboardHtml(withModels, esc);
+    assert.match(html, /closed · 1 attempt · \$0\.15 · grok-4\.6, jev-1\.13/);
+  });
+
+  it('draws nothing for a run that recorded no calls, and formats tokens for reading', () => {
+    assert.equal(modelsHtml([], esc), '');
+    assert.equal(modelsHtml(undefined, esc), '');
+    assert.equal(tokens(950), '950');
+    assert.equal(tokens(41200), '41.2k');
+    assert.equal(tokens(412000), '412k');
+    assert.equal(tokens(2400000), '2.4M');
+    assert.doesNotMatch(dashboardHtml(MAP, esc), /all runs/);
   });
 });
