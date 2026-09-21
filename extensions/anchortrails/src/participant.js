@@ -403,7 +403,11 @@ const READ_ONLY_VERBS = new Set([
   'start-sleep', 'sleep',
 ]);
 const LAUNCH_VERBS = new Set(['start-process', 'start', 'open', 'xdg-open', 'explorer', 'explorer.exe']);
-const DENY_TOKENS = /\b(remove-item|rm|rmdir|del|erase|stop-process|taskkill|kill|pkill|set-\w+|new-item|out-file|add-content|set-content|move-item|rename-item|copy-item|mv|cp|reg(?:\.exe)?|netsh|shutdown|restart-computer|invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget|invoke-expression|iex|format|diskpart|schtasks|sc(?:\.exe)?|wmic|powercfg|msiexec|choco|winget|npm|pip|pip3|git|runas|-verb\s+runas|install|uninstall|sudo|chmod|chown)\b/i;
+// Bare `format` and `sc` used to be in here and matched Format-Table and
+// Select-Object's neighbours -- the verify command of the first hands-off
+// run ("Get-Process | ... | Format-Table") got a modal for it. Word-boundary
+// on a PowerShell verb hits the hyphen; name the dangerous forms instead.
+const DENY_TOKENS = /(?:\b(?:remove-item|rm|rmdir|del|erase|stop-process|taskkill|kill|pkill|set-\w+|new-item|out-file|add-content|set-content|move-item|rename-item|copy-item|mv|cp|reg(?:\.exe)?|netsh|shutdown|restart-computer|invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget|invoke-expression|iex|diskpart|schtasks|wmic|powercfg|msiexec|choco|winget|npm|pip|pip3|git|runas|install|uninstall|sudo|chmod|chown)\b|\bformat(?:\.com)?\s+[a-z]:|\bsc(?:\.exe)?\s+(?:stop|start|delete|config|create)\b|-verb\s+runas)/i;
 const STOP_WORDS = new Set(['launch', 'open', 'start', 'run', 'the', 'app', 'desktop', 'application', 'please', 'and', 'then', 'with', 'for', 'this', 'that', 'from', 'into', 'bring', 'switch']);
 
 function goalWords(goal) {

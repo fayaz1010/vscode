@@ -870,6 +870,11 @@ describe('the tool loop', () => {
     assert.equal(shellAutoApprove('winget install Anthropic.Claude', goal), false, 'installs');
     assert.equal(shellAutoApprove('Start-Process claude.exe -Verb RunAs', goal), false, 'elevation');
     assert.equal(shellAutoApprove('', goal), false);
+    // the verify command of the first hands-off run: Format-Table is not `format C:`
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "Get-Process | Where-Object { $_.ProcessName -match claude } | Select-Object ProcessName, Id, MainWindowTitle | Format-Table -AutoSize"', goal), true);
+    assert.equal(shellAutoApprove('Get-Process claude | Format-List', goal), true);
+    assert.equal(shellAutoApprove('format C: /q', goal), false);
+    assert.equal(shellAutoApprove('sc stop claude', goal), false);
     assert.equal(autoApprove({ name: 'desktop_run_command', input: { command: launch } }, goal), true);
     assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'claude' } }, goal), false, 'unknown verb, and interactive');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude Desktop (plain)' } }, goal), true, 'clicking the app you asked to open');
