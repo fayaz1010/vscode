@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const {
-  BUILTIN_DELEGATE, SCHEMA, AGENTS, AUTO_ORDER, spec, changedSince, runOne, delegate, createImpl, register,
+  BUILTIN_DELEGATE, SCHEMA, AGENTS, AUTO_ORDER, spec, changedSince, resolveWindowsShim, runOne, delegate, createImpl, register,
 } = require('./delegate');
 
 // TESTS NEVER TOUCH A REAL INSTALLED CLI. `claude` and `codex` are on PATH on
@@ -156,5 +156,54 @@ describe('dest delegateToAgent', () => {
     const vscode = { lm: { registerToolDefinition(def) { names.push(def.name); return { dispose() {} }; } } };
     register(vscode);
     assert.deepEqual(names, ['delegateToAgent']);
+  });
+});
+
+describe('resolveWindowsShim', () => {
+  it('is a no-op off Windows -- execFile resolves a real PATH entry there just fine', () => {
+    assert.equal(resolveWindowsShim('claude', 'darwin'), null);
+    assert.equal(resolveWindowsShim('claude', 'linux'), null);
+  });
+
+  it("reads npm's real generated .cmd shim and finds the bundled .exe it wraps", () => {
+    // The exact claude.cmd content found on the machine that surfaced this bug:
+    // execFile('claude', ...) reported "not installed" in 50ms although this
+    // file was sitting on PATH the whole time.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-shim-'));
+    const bundleDir = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin');
+    fs.mkdirSync(bundleDir, { recursive: true });
+    const exePath = path.join(bundleDir, 'claude.exe');
+    fs.writeFileSync(exePath, '');
+    fs.writeFileSync(path.join(dir, 'claude.cmd'), [
+      '@ECHO off', 'GOTO start', ':find_dp0', 'SET dp0=%~dp0', 'EXIT /b', ':start', 'SETLOCAL',
+      'CALL :find_dp0',
+      '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*', '',
+    ].join('\r\n'));
+    const out = resolveWindowsShim('claude', 'win32', dir);
+    assert.ok(out, 'the shim should have been found and parsed');
+    assert.equal(fs.realpathSync(out.bin), fs.realpathSync(exePath));
+    assert.deepEqual(out.prefixArgs, []);
+  });
+
+  it('resolves a .js-backed shim to node.exe plus the script, not the script alone', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-shim-'));
+    const scriptPath = path.join(dir, 'node_modules', 'some-cli', 'bin', 'cli.js');
+    fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+    fs.writeFileSync(scriptPath, '');
+    fs.writeFileSync(path.join(dir, 'somecli.cmd'), '"%dp0%\\node_modules\\some-cli\\bin\\cli.js" %*\r\n');
+    const out = resolveWindowsShim('somecli', 'win32', dir);
+    assert.equal(out.bin, process.execPath);
+    assert.deepEqual(out.prefixArgs, [scriptPath]);
+  });
+
+  it('returns null when there is no shim on PATH, so the caller falls back to the bare name', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-shim-'));
+    assert.equal(resolveWindowsShim('nothing-here', 'win32', dir), null);
+  });
+
+  it('returns null when the shim points at a target that does not actually exist', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-shim-'));
+    fs.writeFileSync(path.join(dir, 'ghost.cmd'), '"%dp0%\\node_modules\\ghost\\bin\\ghost.exe" %*\r\n');
+    assert.equal(resolveWindowsShim('ghost', 'win32', dir), null);
   });
 });

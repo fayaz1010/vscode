@@ -18,6 +18,8 @@
  */
 
 const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const { folderPath } = require('./workspace');
 const { blocked: shellBlocked, showTranscript } = require('./terminal');
 
@@ -133,10 +135,67 @@ function changedSince(before, after) {
   return after.filter((line) => !had.has(line)).map((line) => line.slice(3).trim());
 }
 
+/** Windows only. npm's global installer writes THREE files for one CLI --
+ * `claude`, `claude.cmd`, `claude.ps1` -- and `execFile('claude', ...)`
+ * reports ENOENT for all of them: Node's spawn does not resolve `.cmd`/
+ * `.bat` shims the way a real shell does, confirmed live -- `execFile`
+ * returned "not installed" in 50ms although the shim was sitting right
+ * there. The fix is not `shell: true`: that runs the command through
+ * `cmd.exe /c`, which re-parses the whole line with cmd.exe's OWN
+ * quoting rules -- the exact shell-injection surface `execFile` with an
+ * argument array exists to avoid, and the task text is arbitrary. So
+ * this reads the shim instead: npm's generated `.cmd` always quotes its
+ * real target after substituting `%dp0%` for its own directory --
+ * `"%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe" %*` for
+ * Claude Code on this machine. Read that path out and spawn it directly;
+ * nothing about the task text ever reaches a shell. */
+// Manual, separator-agnostic path handling throughout -- never `path.join`/
+// `path.dirname`, which follow the HOST's own path flavour (POSIX on a Mac
+// or Linux build machine) rather than the Windows target this function is
+// specifically about. `fs` accepts forward slashes interchangeably with
+// backslashes on Windows, so normalising everything to `/` is correct on
+// the real target platform and is also what lets this be unit-tested from
+// any host.
+function joinPath(dir, rel) {
+  return `${String(dir).replace(/[\\/]+$/, '')}/${String(rel).replace(/^[\\/]+/, '').replace(/\\/g, '/')}`;
+}
+
+function resolveWindowsShim(bin, platform = os.platform(), pathEnv = process.env.PATH) {
+  if (platform !== 'win32') return null;
+  const delimiter = pathEnv && pathEnv.includes(';') ? ';' : ':';
+  const dirs = (pathEnv || '').split(delimiter).filter(Boolean);
+  let shim = null;
+  let shimDir = null;
+  for (const dir of dirs) {
+    for (const ext of ['.cmd', '.bat']) {
+      const candidate = joinPath(dir, bin + ext);
+      if (fs.existsSync(candidate)) { shim = candidate; shimDir = dir; break; }
+    }
+    if (shim) break;
+  }
+  if (!shim) return null;
+  let text = '';
+  try {
+    text = fs.readFileSync(shim, 'utf8');
+  } catch {
+    return null;
+  }
+  const m = text.match(/"%dp0%\\?([^"]+)"/i) || text.match(/"%~dp0([^"]+)"/i);
+  if (!m) return null;
+  const target = joinPath(shimDir, m[1]);
+  if (!fs.existsSync(target)) return null;
+  if (/\.exe$/i.test(target)) return { bin: target, prefixArgs: [] };
+  if (/\.js$/i.test(target)) return { bin: process.execPath, prefixArgs: [target] };
+  return null;
+}
+
 function runAgentBin(bin, args, cwd) {
   return new Promise((resolve) => {
     const started = Date.now();
-    execFile(bin, args, {
+    const shim = resolveWindowsShim(bin);
+    const realBin = shim ? shim.bin : bin;
+    const realArgs = shim ? [...shim.prefixArgs, ...args] : args;
+    execFile(realBin, realArgs, {
       cwd: cwd || undefined,
       timeout: TIMEOUT_MS,
       maxBuffer: 4_000_000,
@@ -257,6 +316,7 @@ module.exports = {
   AUTO_ORDER,
   spec,
   changedSince,
+  resolveWindowsShim,
   runOne,
   delegate,
   createImpl,
