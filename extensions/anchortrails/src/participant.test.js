@@ -10,6 +10,7 @@ const {
   buildTurn,
   requestOptions,
   handleTurn,
+  friendlyProgress,
 } = require('./participant');
 
 function prepared(over = {}) {
@@ -549,5 +550,43 @@ describe('handleTurn', () => {
     assert.ok(wire.includes('checkErrors'));
     assert.ok(!wire.includes('desktop_vault_get'));
     assert.ok(sent.tools.length < 30);
+  });
+});
+
+describe('friendlyProgress', () => {
+  it('never shows the raw internal instruction text a person is not meant to see', () => {
+    // The exact bug: someone typed "launch claude desktop" and the chat's own
+    // status line printed turn_plan.py's internal order back at them --
+    // "execute this user line now. Call tools. Do not announce intent." --
+    // via response.progress(prepared.turn.do). friendlyProgress replaces
+    // that call site; it must never be able to surface `do`/`do_not`/`card`,
+    // whatever the server sends in them.
+    const turn = {
+      goal: 'launch claude desktop',
+      playbook: 'turn',
+      do: 'execute this user line now. Call tools. Do not announce intent.',
+      do_not: 'wait for the user or replay leftover session steps unless they said stop',
+      card: 'CARD: goal=launch claude desktop cursor=1/3 ...',
+    };
+    const out = friendlyProgress(turn);
+    assert.doesNotMatch(out, /announce intent/);
+    assert.doesNotMatch(out, /Call tools/);
+    assert.doesNotMatch(out, /CARD:/);
+    assert.equal(out, 'Working on it: launch claude desktop');
+  });
+
+  it('picks a label from the playbook, and falls back sensibly for an unknown one', () => {
+    assert.equal(friendlyProgress({ playbook: 'computer', goal: 'open settings' }), 'Looking at the screen: open settings');
+    assert.equal(friendlyProgress({ playbook: 'forms', goal: 'fill the signup form' }), 'Filling in the form: fill the signup form');
+    assert.equal(friendlyProgress({ playbook: 'session', goal: 'ship the feature' }), 'Working through the plan: ship the feature');
+    assert.equal(friendlyProgress({ playbook: 'something-new', goal: 'x' }), 'Working on it: x');
+    assert.equal(friendlyProgress(null), 'Working on it…');
+    assert.equal(friendlyProgress({}), 'Working on it…');
+  });
+
+  it('clips a long goal instead of running the status line on forever', () => {
+    const long = 'a'.repeat(120);
+    const out = friendlyProgress({ playbook: 'turn', goal: long });
+    assert.equal(out, `Working on it: ${'a'.repeat(60)}…`);
   });
 });

@@ -223,6 +223,30 @@ async function completeVisible(client, turn, prompt) {
   return visibleComplete(out, turn.model);
 }
 
+// A person's own words back, in a bounded, curated frame -- NEVER the raw
+// `do`/`do_not`/`card` fields from turn_plan.py. Those are instructions FOR
+// the model ("execute this user line now. Call tools. Do not announce
+// intent.") and were going straight into response.progress(), which is a
+// user-facing status line -- someone typed "launch claude desktop" and
+// watched the chat print its own internal orders back at them. Only
+// `turn.goal`, a clip of what the user actually typed, is safe to echo.
+const PROGRESS_LABEL = {
+  computer: 'Looking at the screen',
+  forms: 'Filling in the form',
+  session: 'Working through the plan',
+  status: 'Checking the plan',
+  stop: 'Stopping',
+  turn: 'Working on it',
+};
+
+function friendlyProgress(turn) {
+  const label = PROGRESS_LABEL[turn && turn.playbook] || 'Working on it';
+  const goal = typeof (turn && turn.goal) === 'string' ? turn.goal.trim() : '';
+  if (!goal) return `${label}…`;
+  const clipped = goal.length > 60 ? `${goal.slice(0, 60)}…` : goal;
+  return `${label}: ${clipped}`;
+}
+
 async function runModelRound({
   client, vscode, turn, prompt, token, response, toolSession, catalog,
 }) {
@@ -390,7 +414,7 @@ async function handleTurn({
         try { onPlan({ ...prepared.plan, turn: prepared.turn }); } catch { /* Plan panel is optional */ }
       }
       if (prepared && prepared.turn && response && typeof response.progress === 'function') {
-        response.progress(prepared.turn.do || 'turn…');
+        response.progress(friendlyProgress(prepared.turn));
       }
       const turn = buildTurn(prepared, ahead, context && context.history);
       lastTurn = turn;
@@ -496,4 +520,5 @@ module.exports = {
   collectAttachments,
   payloadTokensFor,
   PLAN_HISTORY,
+  friendlyProgress,
 };
