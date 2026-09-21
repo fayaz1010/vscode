@@ -875,6 +875,11 @@ describe('the tool loop', () => {
     assert.equal(shellAutoApprove('Get-Process claude | Format-List', goal), true);
     assert.equal(shellAutoApprove('format C: /q', goal), false);
     assert.equal(shellAutoApprove('sc stop claude', goal), false);
+    const { shellAskReason, approvalText } = require('./participant');
+    assert.equal(shellAskReason('Start-Process notepad.exe', goal), 'it launches something you did not name');
+    assert.equal(shellAskReason('Remove-Item x', goal), 'it uses "Remove-Item"');
+    assert.equal(shellAskReason('claude', goal), '"claude" is not a read or a launch I recognise');
+    assert.match(approvalText({ name: 'desktop_run_command', input: { command: 'Remove-Item x' }, goal }).detail, /Asking because it uses "Remove-Item"\.$/);
     assert.equal(autoApprove({ name: 'desktop_run_command', input: { command: launch } }, goal), true);
     assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'claude' } }, goal), false, 'unknown verb, and interactive');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude Desktop (plain)' } }, goal), true, 'clicking the app you asked to open');

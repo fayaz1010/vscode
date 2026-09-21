@@ -368,7 +368,11 @@ function approvalText(call) {
   const target = input.text || input.label || input.name
     || (input.selector && input.selector.name) || (input.i != null ? `item ${input.i}` : '');
   if (name === 'desktop_run_command' || name === 'runInTerminal') {
-    return { message: 'AnchorTrails wants to run a command on this computer', detail: `Command: ${clip(plainCommand(input), 300)}` };
+    const why = shellAskReason(input.command, call.goal);
+    return {
+      message: 'AnchorTrails wants to run a command on this computer',
+      detail: `Command: ${clip(plainCommand(input), 300)}${why ? `\n\nAsking because ${why}.` : ''}`,
+    };
   }
   if (/click|go$|invoke|press|tap/.test(name)) {
     return { message: `AnchorTrails wants to click${target ? ` "${clip(target, 60)}"` : ''}`, detail: `Tool: ${name}` };
@@ -432,20 +436,29 @@ function verbOf(segment) {
 
 // A command is auto-approvable when every segment is either read-only or a
 // launch of something the user named, and nothing in it writes or reaches out.
-function shellAutoApprove(command, goal) {
+// Returns '' when the command may run without asking, else the reason it
+// must ask -- shown in the modal, so a person can see what tripped it.
+function shellAskReason(command, goal) {
   const plain = plainCommand({ command });
-  if (!plain || />|2>|\bout-file\b/i.test(plain)) return false;
-  if (DENY_TOKENS.test(plain)) return false;
+  if (!plain) return 'empty command';
+  if (/>|2>|\bout-file\b/i.test(plain)) return 'it writes to a file';
+  const deny = plain.match(DENY_TOKENS);
+  if (deny) return `it uses "${deny[0].trim()}"`;
   const segments = commandSegments(plain);
-  if (!segments.length) return false;
+  if (!segments.length) return 'empty command';
   let launches = false;
   for (const seg of segments) {
     const verb = verbOf(seg);
     if (READ_ONLY_VERBS.has(verb)) continue;
     if (LAUNCH_VERBS.has(verb)) { launches = true; continue; }
-    return false;
+    return `"${verb || seg.slice(0, 30)}" is not a read or a launch I recognise`;
   }
-  return launches ? relatedToGoal(plain, goal) : true;
+  if (launches && !relatedToGoal(plain, goal)) return 'it launches something you did not name';
+  return '';
+}
+
+function shellAutoApprove(command, goal) {
+  return shellAskReason(command, goal) === '';
 }
 
 const OPEN_INTENT = /\b(launch|open|start|switch to|bring up|focus|show)\b/i;
@@ -468,7 +481,7 @@ async function confirmWithUser(vscode, state, call) {
   if (autoApprove(call, state.goal)) return true;
   const win = vscode && vscode.window;
   if (!win || typeof win.showWarningMessage !== 'function') return false;
-  const { message, detail } = approvalText(call);
+  const { message, detail } = approvalText({ ...call, goal: state.goal });
   const picked = await win.showWarningMessage(
     message,
     { modal: true, detail },
@@ -879,6 +892,7 @@ module.exports = {
   plainCommand,
   autoApprove,
   shellAutoApprove,
+  shellAskReason,
   APPROVE_ONE,
   APPROVE_TURN,
 };
