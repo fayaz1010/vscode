@@ -175,3 +175,23 @@ describe('ToolSession', () => {
     assert.equal(second.content[0].value, '{"wrote":true}');
   });
 });
+
+describe('desktop_uia_find schema matches the real backend', () => {
+  it('declares a nested selector, not the flat {name, text} that never worked', () => {
+    // "launch claude desktop" called this tool with {query: "Claude"} three
+    // times and found nothing. The DECLARED schema here was {name, text} --
+    // flat -- while the real backend (anchortrails tools/desktop/uia.py)
+    // takes {selector: {name, app, window_title, ...}, limit}. Neither shape
+    // the model tried could ever have worked against the real tool.
+    const { DEST_ALWAYS } = require('./tools');
+    const spec = DEST_ALWAYS.find((t) => t.name === 'desktop_uia_find');
+    assert.ok(spec, 'desktop_uia_find must still be in DEST_ALWAYS');
+    assert.equal(spec.inputSchema.properties.name, undefined, 'name must not be a top-level field');
+    assert.deepEqual(spec.inputSchema.required, ['selector']);
+    const sel = spec.inputSchema.properties.selector;
+    assert.equal(sel.type, 'object');
+    for (const field of ['name', 'app', 'window_title', 'automation_id', 'control_type', 'class_name']) {
+      assert.ok(sel.properties[field], `selector.${field} should be declared`);
+    }
+  });
+});

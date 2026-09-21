@@ -83,8 +83,37 @@ const DEST_ALWAYS = [
   },
   {
     name: 'desktop_uia_find',
-    description: 'Find a native control. Prefer this over a raw pixel click.',
-    inputSchema: { type: 'object', properties: { name: { type: 'string' }, text: { type: 'string' } } },
+    // "launch claude desktop" called this with {query: "Claude"} three times
+    // and found nothing -- the DECLARED schema here was {name, text}, flat,
+    // and the REAL backend (tools/desktop/uia.py) takes a NESTED selector:
+    // {selector: {name, app, window_title, automation_id, ...}}. Neither
+    // shape the model tried could ever have worked; a correctly-shaped call
+    // (selector.name = "Claude") searches the whole desktop, taskbar
+    // included, by default.
+    description: (
+      'Find an accessible control by its display name -- an app in the '
+      + 'taskbar/Start Menu, a button, a menu item. Searches the whole '
+      + 'desktop unless selector.window_title or selector.app scopes it to '
+      + 'one window. Prefer this over a raw pixel click.'
+    ),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Display label, e.g. "Claude", "Save", "File menu".' },
+            app: { type: 'string', description: 'Scope to one running application by name.' },
+            window_title: { type: 'string', description: 'Scope to the window whose title contains this.' },
+            automation_id: { type: 'string' },
+            control_type: { type: 'string', description: 'Button, Edit, ComboBox, MenuItem, ListItem...' },
+            class_name: { type: 'string' },
+          },
+        },
+        limit: { type: 'integer', description: 'Max matches to return (default 20).' },
+      },
+      required: ['selector'],
+    },
   },
   {
     name: 'personal_autoflow_match',
