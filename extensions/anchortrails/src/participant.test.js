@@ -892,6 +892,9 @@ describe('the tool loop', () => {
     assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'notepad' } }, goal), false, 'a program the user did not name');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude Desktop (plain)' } }, goal), true, 'clicking the app you asked to open');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Submit' } }, goal), false);
+    assert.equal(autoApprove({ name: 'desktop_go', input: { i: 6, task: 'open Claude Desktop' } }, 'chat with Claude Desktop (it is already open): ask it to fix x'), true, 'index click, tied to the ask by its task');
+    assert.equal(autoApprove({ name: 'desktop_go', input: { i: 6, task: 'press Submit' } }, 'chat with Claude Desktop (it is already open)'), false);
+    assert.equal(autoApprove({ name: 'desktop_go', input: { i: 6 } }, goal), false, 'no label, no task: nothing to tie it to');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude' } }, 'fill the claude form and submit'), false, 'no open intent in the goal');
     assert.equal(autoApprove({ name: 'browser_fill_editor', input: { text: 'claude' } }, goal), false, 'typing always asks');
     assert.equal(autoApprove({ name: 'browser_navigate', input: { url: 'https://claude.ai' } }, goal), false, 'browser always asks');

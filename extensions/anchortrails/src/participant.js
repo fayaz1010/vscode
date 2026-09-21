@@ -510,7 +510,11 @@ function autoApprove(rawCall, goal) {
     return shellAutoApprove(input.command, goal);
   }
   if (name === 'desktop_go' || name === 'desktop_look_click' || name === 'desktop_uia_invoke') {
-    const target = input.text || input.label || (input.selector && input.selector.name) || '';
+    // A click by map index carries no label; the model's stated `task`
+    // ("open Claude Desktop") is what ties it to the ask. Live: "chat with
+    // Claude Desktop" stalled on a dialog for desktop_go {i: 6}.
+    const target = [input.text, input.label, input.selector && input.selector.name, input.task]
+      .filter(Boolean).join(' ');
     return Boolean(target) && OPEN_INTENT.test(String(goal || '')) && relatedToGoal(target, goal);
   }
   return false;
