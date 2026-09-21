@@ -218,18 +218,32 @@ function dashboardHtml(map, esc, focusTask) {
       return `<div class="ddel"><b>${escape(p.symbol)}</b>${p.marker ? ` <span class="muted">${escape(p.marker)}</span>` : ''}${code ? ` ${code}` : ''}</div>`;
     }).join('');
     const b = (t.execution && t.execution.budgets) || {};
+    // WHAT WAS SET ASIDE, NOT WHAT HAPPENED. Every task in a plan gets the same
+    // estimate when the task class has no history ("no history for this task class"
+    // in plan.sh) -- nine tasks all reading "$0.75 · 15 min · 3 tries" in the header,
+    // identical and prominent, while the real $0.06 and 2 attempts sat dim underneath.
+    // A person reads the bold number first; it must be the one that is true.
     const budget = [b.max_cost_usd != null ? money(b.max_cost_usd) : '', b.max_runtime_seconds != null ? clock(b.max_runtime_seconds) : '', b.max_attempts ? `${b.max_attempts} tries` : ''].filter(Boolean).join(' · ');
+    const estimate = budget ? `est. up to ${budget}` : '';
     const who = r && Array.isArray(r.calls) && r.calls.length
       ? [...new Set(r.calls.map((c) => shortModel(c.model)))].join(', ')
       : '';
+    // THE HEADLINE NUMBER IS WHAT ACTUALLY HAPPENED, once there is a result to show:
+    // real cost, real attempts. The budget -- the same estimate on every task until
+    // one has run -- moves to a smaller aside, and only for tasks still waiting on
+    // it, where it is the only number there is, and is labelled as an estimate.
+    const actual = r && (r.cost_usd != null || r.attempts)
+      ? [r.cost_usd != null ? money(r.cost_usd) : '', r.attempts ? `${r.attempts} attempt${r.attempts === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
+      : '';
+    const headline = actual || estimate || 'no budget';
     const said = r
-      ? [st.label, r.attempts ? `${r.attempts} attempt${r.attempts === 1 ? '' : 's'}` : '', r.cost_usd != null ? money(r.cost_usd) : '', who, st.why].filter(Boolean).join(' · ')
+      ? [st.label, who, st.why].filter(Boolean).join(' · ')
       : (map.running ? 'waiting' : 'not run');
     const cls = `dtask${st.mark ? ` m-${(r && r.outcome) || ''}` : ''}${focusTask && focusTask === t.id ? ' on' : ''}`;
     return `<div class="${cls}" data-task="${escape(t.id)}">
-      <div class="dhead"><span class="dmark">${escape(st.mark || '·')}</span> <b>${escape(String(t.id).replace(/^t\./, ''))}</b><span class="muted"> · ${escape(budget || 'no budget')}</span></div>
+      <div class="dhead"><span class="dmark">${escape(st.mark || '·')}</span> <b>${escape(String(t.id).replace(/^t\./, ''))}</b><span class="muted"> · ${escape(headline)}</span></div>
       ${ds}
-      <div class="meta">${escape(said)}</div>
+      <div class="meta">${escape(said)}${actual && budget ? ` <span class="dbudget">(est. up to ${escape(budget)})</span>` : ''}</div>
     </div>`;
   }).join('');
   const taskList = tasks.length
@@ -282,6 +296,7 @@ const DASH_CSS = `
   .dash .dtask.m-closed, .dash .dtask.m-closed_unreviewed, .dash .dtask.m-already_closed { border-left:3px solid #4fbf9a; }
   .dash .dtask.m-failed { border-left:3px solid #e2533f; }
   .dash .dtask.m-skipped_dirty, .dash .dtask.m-blocked { border-left:3px solid #888; }
+  .dash .dbudget { opacity:.55; font-size:11px; }
   .dash .dmark { display:inline-block; min-width:1.2em; } .dash .ddel { margin:2px 0 0 1.4em; font-size:11.5px; }
   .dash .mcode { opacity:.75; text-decoration:none; color:inherit; } .dash .mcode:hover { opacity:1; text-decoration:underline; }
   .dash.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }

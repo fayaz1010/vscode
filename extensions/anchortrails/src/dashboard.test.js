@@ -58,13 +58,17 @@ describe('Dashboard tab', () => {
     assert.match(html, /11 min<\/div><div class="meta">run time/);
     assert.match(html, /class="bar" title="1 closed · 1 failed · 1 open"/);
     assert.match(html, /seg good" style="width:33%"/);
-    // tasks: mark, deliverable linked into the code, budget, what the run said
+    // tasks: mark, deliverable linked into the code, what the run said -- and the
+    // HEADLINE is the real cost/attempts once a task has run, not the identical
+    // per-class budget estimate every task starts with.
     assert.match(html, /class="dtask m-closed" data-task="t\.ext-src-bridge\.js"/);
-    assert.match(html, /<span class="dmark">✓<\/span> <b>ext-src-bridge\.js<\/b><span class="muted"> · \$0\.75 · 30 min · 3 tries/);
+    assert.match(html, /<span class="dmark">✓<\/span> <b>ext-src-bridge\.js<\/b><span class="muted"> · \$0\.01 · 1 attempt<\/span>/);
     assert.match(html, /<b>mapZone<\/b> <span class="muted">never_referenced<\/span> <a href="#" data-cmd="open-code" data-id="ext\/src\/bridge\.js#164" class="mcode">bridge\.js:164 ↗<\/a>/);
-    assert.match(html, /closed · 1 attempt · \$0\.01 · achieves p=0\.8/);
+    assert.match(html, /closed · achieves p=0\.8/);
+    assert.match(html, /class="dbudget">\(est\. up to \$0\.75 · 30 min · 3 tries\)<\/span>/);
     assert.match(html, /class="dtask m-failed" data-task="t\.ext-src-bridge\.test\.js"/);
-    assert.match(html, /failed · 3 attempts · \$0\.01 · the reply was 38 lines/);
+    assert.match(html, /<b>ext-src-bridge\.test\.js<\/b><span class="muted"> · \$0\.01 · 3 attempts<\/span>/);
+    assert.match(html, /failed · the reply was 38 lines/);
     assert.match(html, /<span class="dmark">·<\/span> <b>ext-src-home\.js<\/b><span class="muted"> · no budget/);
     assert.match(html, /<b>a thing with no line<\/b><\/div>/, 'no line: no link');
     assert.match(html, /<div class="meta">waiting<\/div>/, 'a run in progress: the task not yet reached is waiting');
@@ -169,9 +173,10 @@ describe('Who was paid', () => {
     assert.match(html, /<td>jev-1\.13<\/td><td class="n">4<\/td>/);
   });
 
-  it('names the models on the task row', () => {
+  it('names the models on the task row, and the real cost leads not the estimate', () => {
     const html = dashboardHtml(withModels, esc);
-    assert.match(html, /closed · 1 attempt · \$0\.15 · grok-4\.6, jev-1\.13/);
+    assert.match(html, /<b>ext-src-bridge\.js<\/b><span class="muted"> · \$0\.15 · 1 attempt<\/span>/);
+    assert.match(html, /closed · grok-4\.6, jev-1\.13/);
   });
 
   it('draws nothing for a run that recorded no calls, and formats tokens for reading', () => {
