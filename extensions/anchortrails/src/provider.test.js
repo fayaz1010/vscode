@@ -127,3 +127,87 @@ describe('createProvider', () => {
     assert.match(parts[0].value, /grok-4\.6/);
   });
 });
+
+describe('tool calling through the provider', () => {
+  // For months sendRequest carried `options.tools` and this provider dropped
+  // them on the floor, then reported whatever text came back. No model ever
+  // saw a schema; none could ever ask for a tool.
+  it('forwards sendRequest tools to the node and reports tool_calls as tool-call parts', async () => {
+    let seen;
+    const parts = [];
+    const provider = createProvider({
+      async complete(body) {
+        seen = body;
+        return {
+          text: '',
+          tool_calls: [{ id: 'call_1', name: 'desktop_uia_find', arguments: { query: 'claude' } }],
+        };
+      },
+    });
+    await provider.provideLanguageModelChatResponse(
+      { id: 'grok-4.6' },
+      [{ role: 1, content: [{ value: 'launch claude desktop' }] }],
+      {
+        modelOptions: { system: 'Layer M' },
+        tools: [{ name: 'desktop_uia_find', description: 'find', inputSchema: { type: 'object' } }],
+      },
+      { report: (p) => parts.push(p) },
+    );
+    assert.deepEqual(seen.tools, [{ name: 'desktop_uia_find', description: 'find', inputSchema: { type: 'object' } }]);
+    assert.equal(seen.user, '');
+    assert.deepEqual(seen.messages, [{ role: 'user', content: 'launch claude desktop' }]);
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0].callId, 'call_1');
+    assert.equal(parts[0].name, 'desktop_uia_find');
+    assert.deepEqual(parts[0].input, { query: 'claude' });
+  });
+
+  it('uses the host part classes so the extension host recognises the tool call', async () => {
+    class ToolCallPart { constructor(callId, name, input) { Object.assign(this, { callId, name, input }); } }
+    class TextPart { constructor(value) { this.value = value; } }
+    const parts = [];
+    const provider = createProvider({
+      async complete() { return { text: 'Looking.', tool_calls: [{ id: 'c', name: 'desktop_map', arguments: {} }] }; },
+    }, { LanguageModelToolCallPart: ToolCallPart, LanguageModelTextPart: TextPart });
+    await provider.provideLanguageModelChatResponse(
+      { id: 'grok-4.6' }, [{ role: 1, content: 'go' }], { tools: [{ name: 'desktop_map' }] },
+      { report: (p) => parts.push(p) },
+    );
+    assert.ok(parts[0] instanceof TextPart);
+    assert.ok(parts[1] instanceof ToolCallPart);
+  });
+
+  it('sends earlier tool-call and tool-result parts role-preserved, never flattened', async () => {
+    let seen;
+    const provider = createProvider({
+      async complete(body) { seen = body; return { text: 'Found it.', tool_calls: [] }; },
+    });
+    await provider.provideLanguageModelChatResponse(
+      { id: 'grok-4.6' },
+      [
+        { role: 1, content: [{ value: 'launch claude desktop' }] },
+        { role: 2, content: [{ value: 'Looking.' }, { callId: 'c1', name: 'desktop_uia_find', input: { query: 'claude' } }] },
+        { role: 1, content: [{ callId: 'c1', content: [{ value: '{"count":7}' }] }] },
+      ],
+      { tools: [{ name: 'desktop_uia_find' }] },
+      { report() {} },
+    );
+    assert.deepEqual(seen.messages, [
+      { role: 'user', content: 'launch claude desktop' },
+      { role: 'assistant', content: 'Looking.', tool_calls: [{ id: 'c1', name: 'desktop_uia_find', arguments: { query: 'claude' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: '{"count":7}' },
+    ]);
+  });
+
+  it('a plain answer without tools keeps the legacy flat body', async () => {
+    let seen;
+    const provider = createProvider({
+      async complete(body) { seen = body; return { text: 'hi' }; },
+    });
+    await provider.provideLanguageModelChatResponse(
+      { id: 'grok-4.6' }, [{ role: 1, content: 'hello' }], {}, { report() {} },
+    );
+    assert.equal(seen.user, 'hello');
+    assert.equal(seen.tools, undefined);
+  });
+});

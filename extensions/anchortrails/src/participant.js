@@ -247,8 +247,113 @@ function friendlyProgress(turn) {
   return `${label}: ${clipped}`;
 }
 
+// The tool loop. For months the schemas were registered and passed to
+// sendRequest, and not one call ever ran: nothing read tool-call parts off
+// the stream, nothing invoked, nothing fed a result back. The model only ever
+// saw tool NAMES in the system prompt and wrote prose shaped like a step
+// ledger -- "[>] desktop_uia_find {query: 'claude'} failed" for a query that,
+// run for real, found seven matches. Same shape as Copilot's Agent harness
+// (extChatEndpoint.ts): stream → ToolCallPart → lm.invokeTool → Assistant
+// [call parts] + User [result parts] → send again, until a round has no calls.
+// 24, not a handful: "go to the form, fill it, submit, then check email for
+// the confirmation" is look + one call per field + submit + look + find an
+// email tool + read it. Each round is one model request; the model ends the
+// loop itself by answering without a call.
+const MAX_TOOL_ROUNDS = 24;
+const LEDGER_CLIP = 160;
+
+function clip(s, n) {
+  const str = String(s == null ? '' : s);
+  return str.length > n ? `${str.slice(0, n)}…` : str;
+}
+
+function isToolCallPart(part) {
+  return Boolean(part) && typeof part === 'object' && typeof part.callId === 'string'
+    && typeof part.name === 'string' && 'input' in part;
+}
+
+async function readResponse(response, modelResponse) {
+  const out = { text: '', calls: [], wrote: false };
+  if (!modelResponse) return out;
+  const write = (s) => {
+    if (!s) return;
+    response.markdown(s);
+    out.text += s;
+    out.wrote = true;
+  };
+  if (modelResponse.stream && typeof modelResponse.stream[Symbol.asyncIterator] === 'function') {
+    for await (const part of modelResponse.stream) {
+      if (isToolCallPart(part)) {
+        out.calls.push({ callId: part.callId, name: part.name, input: part.input || {} });
+      } else {
+        write(partText(part));
+      }
+    }
+    return out;
+  }
+  if (modelResponse.text && typeof modelResponse.text[Symbol.asyncIterator] === 'function') {
+    for await (const chunk of modelResponse.text) write(partText(chunk));
+    return out;
+  }
+  if (typeof modelResponse.text === 'string') write(modelResponse.text);
+  return out;
+}
+
+function toolResultText(result) {
+  const content = result && Array.isArray(result.content) ? result.content : [];
+  const s = content.map(partText).join('');
+  if (s) return s;
+  try {
+    return JSON.stringify(result && result.content !== undefined ? result.content : result);
+  } catch {
+    return String(result);
+  }
+}
+
+async function invokeTool(vscode, request, call, token) {
+  const lm = vscode && vscode.lm;
+  if (!lm || typeof lm.invokeTool !== 'function') {
+    return JSON.stringify({ error: `tool ${call.name} is not invokable in this host` });
+  }
+  try {
+    const result = await lm.invokeTool(call.name, {
+      input: call.input,
+      toolInvocationToken: request && request.toolInvocationToken,
+    }, token);
+    return toolResultText(result);
+  } catch (err) {
+    return JSON.stringify({ error: String((err && err.message) || err) });
+  }
+}
+
+// Real part classes when the host has them: the extension host converts
+// message content with instanceof, so a plain object would be dropped.
+function mkText(vscode, s) {
+  return vscode && vscode.LanguageModelTextPart ? new vscode.LanguageModelTextPart(s) : { value: s };
+}
+
+function mkCall(vscode, c) {
+  return vscode && vscode.LanguageModelToolCallPart
+    ? new vscode.LanguageModelToolCallPart(c.callId, c.name, c.input)
+    : { callId: c.callId, name: c.name, input: c.input };
+}
+
+function mkResult(vscode, callId, text) {
+  return vscode && vscode.LanguageModelToolResultPart
+    ? new vscode.LanguageModelToolResultPart(callId, [mkText(vscode, text)])
+    : { callId, content: [{ value: text }] };
+}
+
+// One honest line per REAL call: name, clipped input, clipped result. This
+// is the only ledger the chat prints now; the model cannot author it.
+function ledgerLine(call, text) {
+  let args = '';
+  try { args = JSON.stringify(call.input || {}); } catch { args = ''; }
+  return `\n\n\`${call.name}\` ${clip(args, LEDGER_CLIP)} → ${clip(text, LEDGER_CLIP)}`;
+}
+
 async function runModelRound({
-  client, vscode, turn, prompt, token, response, toolSession, catalog,
+  client, vscode, turn, prompt, token, response, toolSession, catalog, request,
 }) {
   const bound = toolSession
     ? toolSession.bind(vscode, client, turn.tools, catalog)
@@ -271,19 +376,48 @@ async function runModelRound({
     );
     return { error: 'no-provider' };
   }
-  if (response && typeof response.progress === 'function') {
-    response.progress('complete…');
+  const messages = [...(turn.messages || [])];
+  let wroteAny = false;
+  let toolRounds = 0;
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+    if (token && token.isCancellationRequested) return { cancelled: true };
+    if (response && typeof response.progress === 'function') {
+      response.progress(round === 0 ? 'complete…' : 'thinking…');
+    }
+    const sent = await model.sendRequest(
+      toVscodeMessages(vscode, messages),
+      requestOptions(turn, bound),
+      token,
+    );
+    const read = await readResponse(response, sent);
+    wroteAny = wroteAny || read.wrote;
+    if (!read.calls.length) break;
+    if (round === MAX_TOOL_ROUNDS) {
+      response.markdown(`\n\nStopped after ${MAX_TOOL_ROUNDS} tool rounds without a final answer.`);
+      break;
+    }
+    toolRounds += 1;
+    const assistantParts = [];
+    if (read.text) assistantParts.push(mkText(vscode, read.text));
+    for (const c of read.calls) assistantParts.push(mkCall(vscode, c));
+    const resultParts = [];
+    for (const call of read.calls) {
+      if (token && token.isCancellationRequested) return { cancelled: true };
+      if (response && typeof response.progress === 'function') {
+        response.progress(`${call.name}…`);
+      }
+      const text = await invokeTool(vscode, request, call, token);
+      response.markdown(ledgerLine(call, text));
+      wroteAny = true;
+      resultParts.push(mkResult(vscode, call.callId, text));
+    }
+    messages.push({ role: 'assistant', content: assistantParts });
+    messages.push({ role: 'user', content: resultParts });
   }
-  const sent = await model.sendRequest(
-    toVscodeMessages(vscode, turn.messages),
-    requestOptions(turn, bound),
-    token,
-  );
-  const wrote = await streamText(response, sent);
-  if (!wrote) {
+  if (!wroteAny) {
     response.markdown(await completeVisible(client, turn, prompt));
   }
-  return { ok: true };
+  return { ok: true, toolRounds };
 }
 
 async function closeRound({ client, vscode, sessionId, kind, drivePlan, onPlan }) {
@@ -419,7 +553,7 @@ async function handleTurn({
       const turn = buildTurn(prepared, ahead, context && context.history);
       lastTurn = turn;
       const ran = await runModelRound({
-        client, vscode, turn, prompt: ahead, token, response, toolSession, catalog,
+        client, vscode, turn, prompt: ahead, token, response, toolSession, catalog, request,
       });
       if (ran.cancelled) return resultMeta(turn, { error: 'cancelled' });
       if (ran.error) return resultMeta(turn, { error: ran.error });
@@ -480,6 +614,13 @@ function createHandler(client, vscode, extras = {}) {
     sessionId: extras.sessionId,
     tools: extras.toolSession || new ToolSession(),
   };
+  // Register the always-on tools now, not on the first @at turn: Copilot's
+  // Agent-mode harness in this fork drives the same provider and picks
+  // tools from lm.tools, so AT's look/map/go/find and the terminal should
+  // be there before anyone types @at.
+  if (extras.bindAtStart !== false) {
+    try { state.tools.bind(vscode, client, [], null); } catch { /* host without lm */ }
+  }
   const handler = async (request, context, response, token) => {
     const result = await handleTurn({
       client,
@@ -521,4 +662,8 @@ module.exports = {
   payloadTokensFor,
   PLAN_HISTORY,
   friendlyProgress,
+  MAX_TOOL_ROUNDS,
+  readResponse,
+  isToolCallPart,
+  ledgerLine,
 };

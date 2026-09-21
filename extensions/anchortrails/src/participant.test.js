@@ -590,3 +590,126 @@ describe('friendlyProgress', () => {
     assert.equal(out, `Working on it: ${'a'.repeat(60)}…`);
   });
 });
+
+describe('the tool loop', () => {
+  const { MAX_TOOL_ROUNDS, ledgerLine } = require('./participant');
+
+  function toolHost({ onInvoke, replies }) {
+    const sends = [];
+    const invoked = [];
+    let n = 0;
+    const model = {
+      async sendRequest(messages, options) {
+        sends.push({ messages, options });
+        const reply = replies[Math.min(n, replies.length - 1)];
+        n += 1;
+        return { stream: (async function* () { for (const p of reply) yield p; })() };
+      },
+    };
+    const vscode = {
+      lm: {
+        async selectChatModels() { return [model]; },
+        async invokeTool(name, opts) {
+          invoked.push({ name, input: opts.input, token: opts.toolInvocationToken });
+          return onInvoke(name, opts.input);
+        },
+      },
+      LanguageModelChatMessage: {
+        User(c) { return { role: 'user', content: c }; },
+        Assistant(c) { return { role: 'assistant', content: c }; },
+      },
+    };
+    return { vscode, sends, invoked };
+  }
+
+  it('invokes a tool-call part through lm.invokeTool and feeds the result back before the final answer', async () => {
+    // Live: "[>] desktop_uia_find {query: 'claude'} failed -- no UI element
+    // found" was printed for a query that, run for real, found 7 matches.
+    // Nothing had run. Now the ledger line comes from the real result.
+    const { vscode, sends, invoked } = toolHost({
+      onInvoke: () => ({ content: [{ value: '{"count":7,"matches":[{"name":"Claude"}]}' }] }),
+      replies: [
+        [{ value: 'Looking. ' }, { callId: 'c1', name: 'desktop_uia_find', input: { query: 'claude' } }],
+        [{ value: 'Found Claude on the taskbar.' }],
+      ],
+    });
+    const client = { async prepare() { return prepared({ tools_required: true }); } };
+    const response = stream();
+    await handleTurn({
+      client,
+      vscode,
+      request: { prompt: 'launch claude desktop', toolInvocationToken: { session: 's' } },
+      context: { history: [] },
+      response,
+    });
+    assert.equal(invoked.length, 1);
+    assert.equal(invoked[0].name, 'desktop_uia_find');
+    assert.deepEqual(invoked[0].input, { query: 'claude' });
+    assert.deepEqual(invoked[0].token, { session: 's' });
+    assert.equal(sends.length, 2);
+    const second = sends[1].messages;
+    assert.equal(second.length, 3);
+    assert.equal(second[1].role, 'assistant');
+    assert.deepEqual(second[1].content[1], { callId: 'c1', name: 'desktop_uia_find', input: { query: 'claude' } });
+    assert.equal(second[2].role, 'user');
+    assert.equal(second[2].content[0].callId, 'c1');
+    assert.match(second[2].content[0].content[0].value, /"count":7/);
+    const all = response.parts.join('');
+    assert.match(all, /`desktop_uia_find` \{"query":"claude"\} → \{"count":7/);
+    assert.match(all, /Found Claude on the taskbar\.$/);
+  });
+
+  it('turns an invoke failure into a result the model sees, not a crash', async () => {
+    const { vscode, sends } = toolHost({
+      onInvoke: () => { throw new Error('bridge 502'); },
+      replies: [
+        [{ callId: 'c1', name: 'desktop_go', input: { text: 'Claude' } }],
+        [{ value: 'The click failed: bridge 502.' }],
+      ],
+    });
+    const client = { async prepare() { return prepared({ tools_required: true }); } };
+    const response = stream();
+    await handleTurn({
+      client, vscode, request: { prompt: 'click it' }, context: { history: [] }, response,
+    });
+    assert.equal(sends.length, 2);
+    assert.match(sends[1].messages[2].content[0].content[0].value, /bridge 502/);
+    assert.match(response.parts.join(''), /bridge 502/);
+  });
+
+  it('stops after MAX_TOOL_ROUNDS when the model never stops calling tools', async () => {
+    const { vscode, invoked } = toolHost({
+      onInvoke: () => ({ content: [{ value: 'ok' }] }),
+      replies: [[{ callId: 'x', name: 'desktop_look', input: {} }]],
+    });
+    const client = { async prepare() { return prepared({ tools_required: true }); } };
+    const response = stream();
+    await handleTurn({
+      client, vscode, request: { prompt: 'look forever' }, context: { history: [] }, response,
+    });
+    assert.equal(invoked.length, MAX_TOOL_ROUNDS);
+    assert.match(response.parts.join(''), new RegExp(`Stopped after ${MAX_TOOL_ROUNDS} tool rounds`));
+  });
+
+  it('a text-only reply never enters the loop', async () => {
+    const { vscode, sends, invoked } = toolHost({
+      onInvoke: () => ({ content: [] }),
+      replies: [[{ value: 'just an answer' }]],
+    });
+    const client = { async prepare() { return prepared(); } };
+    const response = stream();
+    await handleTurn({
+      client, vscode, request: { prompt: 'hi there' }, context: { history: [] }, response,
+    });
+    assert.equal(sends.length, 1);
+    assert.equal(invoked.length, 0);
+    assert.deepEqual(response.parts, ['just an answer']);
+  });
+
+  it('ledger lines clip long input and results', () => {
+    const line = ledgerLine({ name: 'desktop_uia_find', input: { q: 'x'.repeat(500) } }, 'y'.repeat(500));
+    assert.ok(line.length < 400);
+    assert.match(line, /^\n\n`desktop_uia_find` /);
+    assert.match(line, /…/);
+  });
+});
