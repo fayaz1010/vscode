@@ -31,9 +31,14 @@ function folderPath(vscode) {
   return (user.length ? user[user.length - 1] : paths[paths.length - 1]);
 }
 
+// Split on both separators by hand: path.basename follows the HOST OS, so on
+// macOS/Linux it treats '\\' as an ordinary character and returns
+// 'D:\\at-muwt-probe' whole. A session id from a Windows folder must be the
+// same word on every OS the tests run on.
 function sessionFromPath(folder) {
   if (!folder) return undefined;
-  const base = path.basename(String(folder).replace(/[\\/]+$/, ''));
+  const parts = String(folder).split(/[\\/]+/).filter(Boolean);
+  const base = parts.length ? parts[parts.length - 1] : '';
   return base || undefined;
 }
 
