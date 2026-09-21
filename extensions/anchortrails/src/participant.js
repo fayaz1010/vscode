@@ -365,9 +365,13 @@ function plainCommand(input) {
   return (m ? m[1] : raw).replace(/\\"/g, '"').replace(/\s+/g, ' ').trim();
 }
 
-function approvalText(call) {
+function approvalText(rawCall) {
+  const call = innerCall(rawCall);
   const input = call.input || {};
   const name = String(call.name || '');
+  if (/llm_prompt|ide_relay|ide_send_prompt/.test(name)) {
+    return { message: `AnchorTrails wants to send a message to ${input.ide_id || 'another app'}`, detail: `Message: ${clip(String(input.prompt || input.message || ''), 300)}` };
+  }
   const target = input.text || input.label || input.name
     || (input.selector && input.selector.name) || (input.i != null ? `item ${input.i}` : '');
   if (name === 'desktop_run_command' || name === 'runInTerminal') {
@@ -477,9 +481,31 @@ function shellAutoApprove(command, goal) {
 
 const OPEN_INTENT = /\b(launch|open|start|switch to|bring up|focus|show)\b/i;
 
-function autoApprove(call, goal) {
+// The model reaches the wider floor through meta_invoke_tool; judge the
+// tool it actually asked for, not the door.
+function innerCall(call) {
   const name = String((call && call.name) || '');
   const input = (call && call.input) || {};
+  if (name === 'meta_invoke_tool' && input && typeof input.name === 'string') {
+    return { ...call, name: input.name, input: (input.arguments && typeof input.arguments === 'object') ? input.arguments : {} };
+  }
+  return { ...call, name, input };
+}
+
+const CHAT_INTENT = /\b(chat|ask|tell|send|prompt|message|talk|say)\b/i;
+const IDE_WORDS = { claude_desktop: 'claude', claude: 'claude', cursor: 'cursor', codex: 'codex', windsurf: 'windsurf', vscode: 'vscode', antigravity: 'antigravity' };
+
+function autoApprove(rawCall, goal) {
+  const call = innerCall(rawCall);
+  const name = String(call.name || '');
+  const input = call.input || {};
+  // Sending a chat message to the app the user asked to chat with is the
+  // objective, not an intrusion. Form filling on a web page stays gated.
+  if (/llm_prompt|ide_relay|ide_send_prompt/.test(name)) {
+    const ide = String(input.ide_id || '').toLowerCase();
+    const word = IDE_WORDS[ide] || ide.split('_')[0];
+    return Boolean(word) && CHAT_INTENT.test(String(goal || '')) && String(goal || '').toLowerCase().includes(word);
+  }
   if (name === 'desktop_run_command' || name === 'runInTerminal') {
     return shellAutoApprove(input.command, goal);
   }
@@ -907,6 +933,7 @@ module.exports = {
   autoApprove,
   shellAutoApprove,
   shellAskReason,
+  innerCall,
   APPROVE_ONE,
   APPROVE_TURN,
 };

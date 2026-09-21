@@ -224,3 +224,46 @@ describe('browser_skill_replay schema matches the real backend', () => {
     assert.deepEqual(spec.inputSchema.required, ['task']);
   });
 });
+
+describe('meta_invoke_tool is unwrapped by the client', () => {
+  // Live: meta_invoke_tool is mutating on the bridge, and the inner tool
+  // gates again inside it -- the second gate's approval_required came back
+  // nested, with its token, as plain tool text; the model printed the token
+  // in chat and no dialog was shown.
+  it('invokes the inner tool by name, so one gate, and never forwards a token from the model', async () => {
+    const { createImpl, unwrapInvoke, resultText } = require('./tools');
+    const calls = [];
+    const client = {
+      async invoke(name, args, opts) {
+        calls.push({ name, args, opts });
+        if (!opts.approvalToken) return { approval_required: true, approval_token: 'tok-1', tool: name };
+        return { ok: true, data: { sent: true } };
+      },
+    };
+    const session = new (require('./tools').ToolSession)();
+    const impl = createImpl(client, null, 'meta_invoke_tool', session, new Set(['desktop_vault_get']));
+    const first = await impl.invoke({ input: { name: 'desktop_llm_prompt', arguments: { ide_id: 'claude_desktop', prompt: 'hi', approval_token: 'model-made-this-up' } } });
+    assert.equal(calls[0].name, 'desktop_llm_prompt');
+    assert.deepEqual(calls[0].args, { ide_id: 'claude_desktop', prompt: 'hi' });
+    assert.equal(calls[0].opts.approvalToken, undefined);
+    assert.match(first.content[0].value, /approval_required/);
+    assert.ok(!first.content[0].value.includes('tok-1'), 'token stays in the session');
+    const second = await impl.invoke({ input: { name: 'desktop_llm_prompt', arguments: { ide_id: 'claude_desktop', prompt: 'hi' }, approve: true } });
+    assert.equal(calls[1].opts.approvalToken, 'tok-1');
+    assert.match(second.content[0].value, /"sent":true/);
+    assert.deepEqual(unwrapInvoke('meta_invoke_tool', { name: 'desktop_vault_get', arguments: {} }, new Set(['desktop_vault_get'])).error, 'desktop_vault_get is not available from chat');
+    assert.equal(resultText({ ok: true, data: { approval_required: true, approval_token: 'abc' } }).includes('abc'), false);
+  });
+
+  it('a nested approval_required (inside data) is treated like a top-level one', async () => {
+    const { createImpl, nestedApproval } = require('./tools');
+    assert.ok(nestedApproval({ ok: true, data: { approval_required: true, approval_token: 't' } }));
+    assert.equal(nestedApproval({ ok: true, data: { count: 7 } }), null);
+    const session = new (require('./tools').ToolSession)();
+    const impl = createImpl({ async invoke() { return { ok: true, data: { approval_required: true, approval_token: 't2', tool: 'desktop_go' } }; } }, null, 'desktop_go', session);
+    const out = await impl.invoke({ input: { i: 0 } });
+    assert.match(out.content[0].value, /approval_required/);
+    assert.ok(!out.content[0].value.includes('t2'));
+    assert.equal(session.takeApproval('desktop_go'), 't2');
+  });
+});

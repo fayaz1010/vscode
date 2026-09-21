@@ -895,6 +895,17 @@ describe('the tool loop', () => {
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude' } }, 'fill the claude form and submit'), false, 'no open intent in the goal');
     assert.equal(autoApprove({ name: 'browser_fill_editor', input: { text: 'claude' } }, goal), false, 'typing always asks');
     assert.equal(autoApprove({ name: 'browser_navigate', input: { url: 'https://claude.ai' } }, goal), false, 'browser always asks');
+    // through the door: judge the tool behind meta_invoke_tool
+    const chatGoal = 'chat with Claude Desktop: set its folder to D:\\code-oss and ask it to fix sessionFromPath';
+    const relay = { name: 'meta_invoke_tool', input: { name: 'desktop_llm_prompt', arguments: { ide_id: 'claude_desktop', prompt: 'fix sessionFromPath', workspace_path: 'D:\\code-oss' } } };
+    assert.equal(autoApprove(relay, chatGoal), true, 'messaging the app the user asked to chat with');
+    assert.equal(autoApprove(relay, 'launch claude desktop'), false, 'no chat intent in the goal');
+    assert.equal(autoApprove({ ...relay, input: { ...relay.input, arguments: { ...relay.input.arguments, ide_id: 'cursor' } } }, chatGoal), false, 'a different app than the one named');
+    assert.equal(autoApprove({ name: 'meta_invoke_tool', input: { name: 'desktop_run_command', arguments: { command: 'where.exe claude' } } }, goal), true, 'a read through the door');
+    assert.equal(autoApprove({ name: 'meta_invoke_tool', input: { name: 'browser_fill_editor', arguments: { text: 'x' } } }, chatGoal), false);
+    const { approvalText: at2 } = require('./participant');
+    assert.match(at2(relay).message, /send a message to claude_desktop/);
+    assert.match(at2(relay).detail, /Message: fix sessionFromPath/);
   });
 
   it('an auto-approved call re-invokes with approve=true and never shows the modal', async () => {

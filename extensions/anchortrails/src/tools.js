@@ -33,8 +33,10 @@ const DEST_ALWAYS = [
   },
   {
     name: 'meta_invoke_tool',
-    description: 'Run any AT tool by name. Mutating tools may pause for approve=true.',
-    inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object' }, approval_token: { type: 'string' } }, required: ['name'] },
+    // No approval_token here: the person approves, in a dialog; the model
+    // never sees or handles a token. Live, one leaked into the chat text.
+    description: 'Run any AT tool by name after meta_describe_tool. Mutating tools pause for the person to approve.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object' } }, required: ['name'] },
   },
   {
     name: 'browser_look',
@@ -257,27 +259,61 @@ function resultText(out) {
   if (/sk-|api[_-]?key|BEGIN [A-Z]+ PRIVATE|password\s*[:=]/i.test(s)) {
     return '{"ok":true,"omitted":"secret value stayed on the node"}';
   }
-  return s;
+  // An approval token is for the dialog, never for the model.
+  return s.replace(/"approval_token"\s*:\s*"[^"]*"/g, '"approval_token":"(held)"');
 }
 
-function createImpl(client, vscode, name, session) {
+function nestedApproval(out) {
+  if (!out || typeof out !== 'object') return null;
+  if (out.approval_required) return out;
+  const inner = out.data;
+  if (inner && typeof inner === 'object' && inner.approval_required) return inner;
+  return null;
+}
+
+const META_INVOKE = 'meta_invoke_tool';
+
+// meta_invoke_tool is the model's door to the 600-tool floor. The client
+// walks through it itself: the inner tool is invoked by name, so there is
+// ONE approval gate (the inner tool's), not two (meta_invoke_tool is
+// mutating on the bridge, and the inner tool gates again inside it). Live,
+// the double gate produced a nested approval_required whose token reached
+// the model, and no dialog. The catalog deny list applies to the inner name.
+function unwrapInvoke(name, input, deny) {
+  if (name !== META_INVOKE) return { name, input, error: null };
+  const inner = String(input.name || '').trim();
+  const args = input.arguments && typeof input.arguments === 'object' ? { ...input.arguments } : {};
+  if (!inner) return { name, input, error: 'meta_invoke_tool needs a tool name' };
+  if (deny && deny.has(inner)) return { name, input, error: `${inner} is not available from chat` };
+  delete args.approval_token;
+  return { name: inner, input: args, error: null };
+}
+
+function createImpl(client, vscode, name, session, deny) {
   return {
     async invoke(options) {
-      const input = { ...((options && options.input) || {}) };
-      const approve = Boolean(input.approve);
-      delete input.approve;
-      const approvalToken = approve && session ? session.takeApproval(name) : undefined;
-      const out = await client.invoke(name, input, { approvalToken, autoApprove: false });
+      const raw = { ...((options && options.input) || {}) };
+      const approve = Boolean(raw.approve);
+      delete raw.approve;
+      delete raw.approval_token;
+      const target = unwrapInvoke(name, raw, deny);
       let text;
-      if (out && out.approval_required) {
-        if (session && out.approval_token) session.holdApproval(name, out.approval_token);
-        text = JSON.stringify({
-          approval_required: true,
-          tool: name,
-          hint: 'ask the user to confirm, then call again with approve=true',
-        });
+      if (target.error) {
+        text = JSON.stringify({ error: target.error });
       } else {
-        text = resultText(out);
+        const approvalToken = approve && session ? session.takeApproval(target.name) : undefined;
+        const out = await client.invoke(target.name, target.input, { approvalToken, autoApprove: false });
+        const pending = nestedApproval(out);
+        if (pending) {
+          if (session && pending.approval_token) session.holdApproval(target.name, pending.approval_token);
+          text = JSON.stringify({
+            approval_required: true,
+            tool: target.name,
+            hint: 'ask the user to confirm, then call again with approve=true',
+          });
+        } else {
+          text = resultText(out);
+        }
       }
       if (vscode && vscode.LanguageModelToolResult && vscode.LanguageModelTextPart) {
         return new vscode.LanguageModelToolResult([
@@ -317,8 +353,9 @@ class ToolSession {
     this.dispose();
     const tools = chatTools([...(entries || []), ...destAlways(entries)], catalog);
     const lm = vscode && vscode.lm;
+    const deny = secretSet(catalog);
     for (const spec of tools) {
-      const impl = createImpl(client, vscode, spec.name, this);
+      const impl = createImpl(client, vscode, spec.name, this, deny);
       if (lm && typeof lm.registerToolDefinition === 'function') {
         this._disposables.push(lm.registerToolDefinition({
           name: spec.name,
@@ -371,5 +408,8 @@ module.exports = {
   chatTools,
   resultText,
   createImpl,
+  unwrapInvoke,
+  nestedApproval,
+  META_INVOKE,
   ToolSession,
 };
