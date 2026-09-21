@@ -195,3 +195,19 @@ describe('desktop_uia_find schema matches the real backend', () => {
     }
   });
 });
+
+describe('desktop_run_command is a first-class tool, not buried behind meta_invoke_tool', () => {
+  it('is declared directly in DEST_ALWAYS with a real command field', () => {
+    // Every UI-automation search this session had room to guess a wrong
+    // shape or narrate a fictional result. desktop_run_command was already
+    // callable via meta_invoke_tool, three layers of indirection away --
+    // declaring it directly here puts a deterministic "does this app even
+    // exist" check right next to desktop_uia_find, instead of leaving the
+    // model to discover and thread the meta-tool path on its own.
+    const { DEST_ALWAYS } = require('./tools');
+    const spec = DEST_ALWAYS.find((t) => t.name === 'desktop_run_command');
+    assert.ok(spec, 'desktop_run_command must be in DEST_ALWAYS');
+    assert.equal(spec.inputSchema.properties.command.type, 'string');
+    assert.deepEqual(spec.inputSchema.required, ['command']);
+  });
+});

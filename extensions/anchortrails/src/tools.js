@@ -116,6 +116,32 @@ const DEST_ALWAYS = [
     },
   },
   {
+    name: 'desktop_run_command',
+    // Every UI-automation search this session (desktop_uia_find, desktop_go)
+    // had room to guess a wrong call shape, or even narrate a fictional
+    // result with no real tool call behind it -- a shell command either
+    // finds something or it doesn't, with no UI tree to walk and no fuzzy
+    // name to match. Give the model a deterministic way to check first,
+    // rather than reaching straight for fuzzy on-screen search.
+    description: (
+      'Run one shell command and read its real stdout/stderr/exit code -- '
+      + 'no UI tree, no guessing. Use to check whether an app is installed '
+      + '(where.exe, Get-Command), find its real path, or check whether a '
+      + 'process is already running (Get-Process), before searching for it '
+      + 'on screen with desktop_uia_find. Refuses commands that synthesize '
+      + 'keyboard or mouse input.'
+    ),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell command to run, e.g. "where.exe claude" or "Get-Process claude".' },
+        cwd: { type: 'string', description: 'Working directory. Optional.' },
+        timeout_seconds: { type: 'integer', description: 'Kill the command after this long. Default 30.' },
+      },
+      required: ['command'],
+    },
+  },
+  {
     name: 'personal_autoflow_match',
     description: 'Match a learned action flow before rediscovering the UI.',
     inputSchema: { type: 'object', properties: { goal: { type: 'string' } }, required: ['goal'] },
