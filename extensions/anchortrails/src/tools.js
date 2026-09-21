@@ -113,6 +113,7 @@ const BUILTIN_EDIT = 'vscode_editFile';
 const { BUILTIN_TERMINAL, spec: terminalSpec, register: registerTerminal } = require('./terminal');
 const { spec: editSpec, register: registerEdit } = require('./edit');
 const { spec: checkSpec, register: registerCheck, collectDiagnostics } = require('./check');
+const { BUILTIN_DELEGATE, spec: delegateSpec, register: registerDelegate } = require('./delegate');
 
 function secretSet(catalog) {
   const extra = (catalog && catalog.secret_tools) || [];
@@ -267,6 +268,7 @@ class ToolSession {
     this._disposables.push(registerTerminal(vscode));
     this._disposables.push(registerCheck(vscode));
     this._disposables.push(registerEdit(vscode, afterWrite));
+    this._disposables.push(registerDelegate(vscode));
     if (!tools.some((t) => t.name === BUILTIN_TERMINAL)) {
       tools.push(terminalSpec());
     }
@@ -275,6 +277,9 @@ class ToolSession {
     }
     if (!tools.some((t) => t.name === checkSpec().name)) {
       tools.push(checkSpec());
+    }
+    if (!tools.some((t) => t.name === BUILTIN_DELEGATE)) {
+      tools.push(delegateSpec());
     }
     return tools;
   }
@@ -286,6 +291,7 @@ module.exports = {
   destAlways,
   BUILTIN_EDIT,
   BUILTIN_TERMINAL,
+  BUILTIN_DELEGATE,
   secretSet,
   meshAnnotate,
   clustryAnnotate,

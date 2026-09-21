@@ -1,0 +1,160 @@
+'use strict';
+
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
+const { execFile } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const {
+  BUILTIN_DELEGATE, SCHEMA, AGENTS, AUTO_ORDER, spec, changedSince, runOne, delegate, createImpl, register,
+} = require('./delegate');
+
+// TESTS NEVER TOUCH A REAL INSTALLED CLI. `claude` and `codex` are on PATH on
+// the machine these tests were first run on -- an earlier version of this
+// suite called `runOne('claude', ...)` directly and it silently ran the real
+// CLI, spending real API credits, for over ten seconds per test. Every test
+// below passes its OWN agents map pointing at a tiny node stand-in script,
+// so nothing here can reach `claude`, `cursor-agent` or `codex` for real,
+// no matter what happens to be installed on the machine running the suite.
+
+function tmpRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-delegate-'));
+  return new Promise((resolve, reject) => {
+    execFile('git', ['init', '-q'], { cwd: dir }, (err) => {
+      if (err) return reject(err);
+      execFile('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'x'], { cwd: dir }, (err2) => {
+        if (err2) return reject(err2);
+        resolve(dir);
+      });
+    });
+  });
+}
+
+/** A stand-in "agent": a node script under `dir`, wired the same shape as a
+ * real AGENTS entry (`bin`, `args`, `note`) but pointed at `process.execPath`
+ * running our own script -- never at a real external CLI name. */
+function stubAgent(dir, body) {
+  const file = path.join(dir, `stub-${Math.random().toString(36).slice(2)}.js`);
+  fs.writeFileSync(file, body);
+  return { bin: process.execPath, args: (task) => [file, task], note: 'test stand-in' };
+}
+
+function missingAgents() {
+  // A binary name guaranteed not to exist, for every slot -- proves the
+  // "not installed" path without depending on what is or isn't on THIS
+  // machine's PATH.
+  const missing = { bin: 'at-delegate-test-nonexistent-binary', args: (t) => [t], note: 'missing' };
+  return { claude: missing, cursor: missing, codex: missing };
+}
+
+describe('dest delegateToAgent', () => {
+  it('is a dest builtin with a real name and a required task', () => {
+    assert.equal(BUILTIN_DELEGATE, 'delegateToAgent');
+    assert.equal(spec().name, 'delegateToAgent');
+    assert.deepEqual(SCHEMA.required, ['agent', 'task']);
+    assert.deepEqual(SCHEMA.properties.agent.enum, ['claude', 'cursor', 'codex', 'auto']);
+  });
+
+  it('names claude, cursor and codex, in that fallback order for auto', () => {
+    assert.deepEqual(AUTO_ORDER, ['claude', 'cursor', 'codex']);
+    assert.ok(AGENTS.claude && AGENTS.cursor && AGENTS.codex);
+    for (const name of AUTO_ORDER) {
+      assert.equal(typeof AGENTS[name].bin, 'string');
+      assert.equal(typeof AGENTS[name].args, 'function');
+    }
+  });
+
+  it('does not shell-quote the task -- args are an array reaching the process directly', () => {
+    const args = AGENTS.claude.args('anything; rm -rf / && echo "gotcha"');
+    assert.deepEqual(args, ['-p', 'anything; rm -rf / && echo "gotcha"', '--output-format', 'json']);
+  });
+
+  it('refuses a task that reads as a destructive shell action, before ever spawning a CLI', async () => {
+    const out = await delegate({ agent: 'claude', task: 'run rm -rf / to clean up' }, process.cwd(), missingAgents());
+    assert.equal(out.ok, false);
+    assert.match(out.error, /blocked/);
+  });
+
+  it('reports a missing binary as "not installed", not a generic failure', async () => {
+    const out = await runOne('claude', 'say hello', process.cwd(), missingAgents());
+    assert.equal(out.missing, true);
+    assert.match(out.error, /not installed/);
+  });
+
+  it('auto tries every agent in order and reports all three as missing together', async () => {
+    const out = await delegate({ agent: 'auto', task: 'say hello' }, process.cwd(), missingAgents());
+    assert.equal(out.ok, false);
+    assert.deepEqual(out.tried, ['claude', 'cursor', 'codex']);
+    assert.match(out.error, /claude, cursor, codex/);
+  });
+
+  it('auto stops at the first agent that is actually installed', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-delegate-'));
+    const agents = {
+      claude: { bin: 'at-delegate-test-nonexistent-binary', args: (t) => [t], note: '' },
+      cursor: stubAgent(dir, "process.exit(0);"),
+      codex: { bin: 'at-delegate-test-nonexistent-binary-2', args: (t) => [t], note: '' },
+    };
+    const out = await delegate({ agent: 'auto', task: 'x' }, dir, agents);
+    assert.equal(out.agent, 'cursor');
+    assert.equal(out.ok, true);
+  });
+
+  it('changedSince finds only what is new, and returns null when there is nothing to compare', () => {
+    assert.equal(changedSince(null, ['??  a.txt']), null);
+    assert.equal(changedSince(['??  a.txt'], null), null);
+    const before = [' M src/a.ts', '?? old.txt'];
+    const after = [' M src/a.ts', '?? old.txt', '?? new.ts', ' M src/b.ts'];
+    assert.deepEqual(changedSince(before, after), ['new.ts', 'src/b.ts']);
+    assert.deepEqual(changedSince([], []), []);
+  });
+
+  it("reads real git status before and after a run, not the agent's own say-so", async () => {
+    const repo = await tmpRepo();
+    const agents = { claude: stubAgent(repo, "require('fs').writeFileSync('made.txt', 'hi');"), cursor: AGENTS.cursor, codex: AGENTS.codex };
+    const out = await runOne('claude', 'x', repo, agents);
+    assert.equal(out.ok, true);
+    assert.deepEqual(out.changed_files, ['made.txt']);
+  });
+
+  it('reports exit code and stderr honestly when the agent fails', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'at-delegate-'));
+    const agents = { claude: stubAgent(dir, "process.stderr.write('boom'); process.exit(3);"), cursor: AGENTS.cursor, codex: AGENTS.codex };
+    const out = await runOne('claude', 'x', dir, agents);
+    assert.equal(out.ok, false);
+    assert.equal(out.exit, 3);
+    assert.match(out.stderr, /boom/);
+  });
+
+  it('carries the note about best-effort flags on cursor and codex', async () => {
+    const out = await runOne('cursor', 'x', process.cwd(), missingAgents());
+    assert.match(out.error, /not installed/);
+    // the real registry (not the missing-stub one) is what ships the note
+    assert.match(AGENTS.cursor.note, /best-effort|Best-effort/);
+    assert.match(AGENTS.codex.note, /best-effort|Best-effort/);
+  });
+
+  it('shows the run in the same AT terminal transcript, so the user watches it happen', async () => {
+    const sent = [];
+    const vscode = {
+      window: {
+        terminals: [],
+        createTerminal({ name }) { return { name, show() { sent.push('show'); }, sendText(t) { sent.push(t); } }; },
+      },
+      workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
+    };
+    const impl = createImpl(vscode);
+    const out = await impl.invoke({ input: { agent: 'claude', task: 'rm -rf / everything' } });
+    const body = JSON.parse(out.content[0].value);
+    assert.equal(body.ok, false);
+    assert.ok(sent.includes('show'), 'the transcript still paints even for a refused call');
+  });
+
+  it('registers on dest lm', () => {
+    const names = [];
+    const vscode = { lm: { registerToolDefinition(def) { names.push(def.name); return { dispose() {} }; } } };
+    register(vscode);
+    assert.deepEqual(names, ['delegateToAgent']);
+  });
+});
