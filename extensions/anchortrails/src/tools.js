@@ -169,11 +169,12 @@ const DEST_ALWAYS = [
     // job; declare it, and say the one precondition it has.
     description: (
       'Send a message to another AI app\'s chat (claude_desktop, cursor, codex, '
-      + 'windsurf) and wait for its reply. The app must be running with a debug '
-      + 'port: if the reply says no CDP / not reachable, call '
-      + 'desktop_ide_launch_with_debug for that ide_id first (it starts a fresh '
-      + 'instance with --remote-debugging-port) and pass the port it returns. '
-      + 'Pass workspace_path to set the folder the app works in.'
+      + 'windsurf) and wait for its reply. Omit port: the tool then drives the '
+      + 'app\'s own window through accessibility, the only path for '
+      + 'claude_desktop (it blocks debug ports). For cursor/codex/windsurf a '
+      + 'port from desktop_ide_launch_with_debug is faster. Pass workspace_path '
+      + 'for the folder the app should work in. The app must be running with a '
+      + 'visible window -- launch it first if it is not.'
     ),
     inputSchema: {
       type: 'object',
@@ -181,7 +182,7 @@ const DEST_ALWAYS = [
         ide_id: { type: 'string', description: 'claude_desktop | cursor | codex | windsurf' },
         prompt: { type: 'string', description: 'What to say to it.' },
         workspace_path: { type: 'string', description: 'Folder the app should work in, e.g. D:\\code-oss.' },
-        port: { type: 'integer', description: 'Debug port from desktop_ide_launch_with_debug (claude_desktop default 9225).' },
+        port: { type: 'integer', description: 'Only a port desktop_ide_launch_with_debug returned. Never for claude_desktop.' },
         timeout_seconds: { type: 'number', description: 'How long to wait for the reply (default 300).' },
       },
       required: ['ide_id', 'prompt'],
@@ -190,9 +191,11 @@ const DEST_ALWAYS = [
   {
     name: 'desktop_ide_launch_with_debug',
     description: (
-      'Start a fresh instance of an AI app or IDE with --remote-debugging-port '
-      + 'so desktop_llm_prompt can talk to it. Returns the port and pid. '
-      + 'Use force_restart when the app is already open without a port.'
+      'Start a fresh instance of cursor / codex / windsurf with '
+      + '--remote-debugging-port so desktop_llm_prompt can talk to it fast. '
+      + 'Returns the port and pid. Not for claude_desktop (it blocks debug '
+      + 'ports; talk to it without a port). Use force_restart when the app is '
+      + 'already open without a port.'
     ),
     inputSchema: {
       type: 'object',
