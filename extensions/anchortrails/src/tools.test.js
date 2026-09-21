@@ -267,3 +267,19 @@ describe('meta_invoke_tool is unwrapped by the client', () => {
     assert.equal(session.takeApproval('desktop_go'), 't2');
   });
 });
+
+describe('talking to another app is a first-class tool', () => {
+  it('declares desktop_llm_prompt and desktop_ide_launch_with_debug with the real field names', () => {
+    // 24 rounds of meta_search_tools to find a way into Claude Desktop's chat.
+    const { DEST_ALWAYS } = require('./tools');
+    const prompt = DEST_ALWAYS.find((t) => t.name === 'desktop_llm_prompt');
+    assert.ok(prompt);
+    assert.deepEqual(prompt.inputSchema.required, ['ide_id', 'prompt']);
+    for (const f of ['ide_id', 'prompt', 'workspace_path', 'port', 'timeout_seconds']) assert.ok(prompt.inputSchema.properties[f], f);
+    assert.match(prompt.description, /desktop_ide_launch_with_debug/);
+    const launch = DEST_ALWAYS.find((t) => t.name === 'desktop_ide_launch_with_debug');
+    assert.ok(launch);
+    assert.deepEqual(launch.inputSchema.required, ['ide_id']);
+    for (const f of ['ide_id', 'port', 'extra_args', 'force_restart']) assert.ok(launch.inputSchema.properties[f], f);
+  });
+});

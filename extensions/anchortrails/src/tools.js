@@ -162,6 +162,50 @@ const DEST_ALWAYS = [
     },
   },
   {
+    name: 'desktop_llm_prompt',
+    // "chat with Claude Desktop and ask it to fix X" spent 24 rounds looking
+    // for a way in: window hidden, no debug port on that instance, this tool
+    // only reachable through meta_search_tools. It is the one tool for the
+    // job; declare it, and say the one precondition it has.
+    description: (
+      'Send a message to another AI app\'s chat (claude_desktop, cursor, codex, '
+      + 'windsurf) and wait for its reply. The app must be running with a debug '
+      + 'port: if the reply says no CDP / not reachable, call '
+      + 'desktop_ide_launch_with_debug for that ide_id first (it starts a fresh '
+      + 'instance with --remote-debugging-port) and pass the port it returns. '
+      + 'Pass workspace_path to set the folder the app works in.'
+    ),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ide_id: { type: 'string', description: 'claude_desktop | cursor | codex | windsurf' },
+        prompt: { type: 'string', description: 'What to say to it.' },
+        workspace_path: { type: 'string', description: 'Folder the app should work in, e.g. D:\\code-oss.' },
+        port: { type: 'integer', description: 'Debug port from desktop_ide_launch_with_debug (claude_desktop default 9225).' },
+        timeout_seconds: { type: 'number', description: 'How long to wait for the reply (default 300).' },
+      },
+      required: ['ide_id', 'prompt'],
+    },
+  },
+  {
+    name: 'desktop_ide_launch_with_debug',
+    description: (
+      'Start a fresh instance of an AI app or IDE with --remote-debugging-port '
+      + 'so desktop_llm_prompt can talk to it. Returns the port and pid. '
+      + 'Use force_restart when the app is already open without a port.'
+    ),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ide_id: { type: 'string', description: 'claude_desktop | cursor | codex | windsurf' },
+        port: { type: 'integer', description: 'Optional; defaults to the app\'s usual port.' },
+        extra_args: { type: 'array', items: { type: 'string' }, description: 'e.g. a workspace path.' },
+        force_restart: { type: 'boolean', description: 'Quit the running instance first.' },
+      },
+      required: ['ide_id'],
+    },
+  },
+  {
     name: 'personal_autoflow_match',
     description: 'Match a learned action flow before rediscovering the UI.',
     inputSchema: { type: 'object', properties: { goal: { type: 'string' } }, required: ['goal'] },
