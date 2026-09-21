@@ -384,8 +384,84 @@ function approvalText(call) {
   return { message: `AnchorTrails wants to run ${name}`, detail: clip(args, 300) };
 }
 
+// Skip the modal for what cannot hurt and is plainly part of the ask:
+// reading state (Get-Process, where.exe, dir) and launching an app the
+// user named. Everything that changes something -- a click on a control,
+// typing, a browser action, any command that writes, deletes, installs,
+// kills or reaches the network -- still asks. The user's words: "skip
+// approval for app launches and no intrusive things, if related to their
+// objective".
+const READ_ONLY_VERBS = new Set([
+  'get-process', 'get-startapps', 'get-command', 'get-childitem', 'get-item',
+  'get-content', 'get-date', 'get-location', 'get-ciminstance', 'get-service',
+  'get-nettcpconnection', 'get-volume', 'get-psdrive', 'test-path',
+  'resolve-path', 'select-object', 'where-object', 'sort-object', 'format-list',
+  'format-table', 'measure-object', 'out-string', 'write-output', 'write-host',
+  'select-string', 'foreach-object', 'where.exe', 'where', 'dir', 'ls', 'type',
+  'cat', 'echo', 'hostname', 'whoami', 'tasklist', 'findstr', 'grep', 'head',
+  'tail', 'pwd', 'ver', 'systeminfo', 'ps', 'which', 'find', 'wc', 'uname',
+  'start-sleep', 'sleep',
+]);
+const LAUNCH_VERBS = new Set(['start-process', 'start', 'open', 'xdg-open', 'explorer', 'explorer.exe']);
+const DENY_TOKENS = /\b(remove-item|rm|rmdir|del|erase|stop-process|taskkill|kill|pkill|set-\w+|new-item|out-file|add-content|set-content|move-item|rename-item|copy-item|mv|cp|reg(?:\.exe)?|netsh|shutdown|restart-computer|invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget|invoke-expression|iex|format|diskpart|schtasks|sc(?:\.exe)?|wmic|powercfg|msiexec|choco|winget|npm|pip|pip3|git|runas|-verb\s+runas|install|uninstall|sudo|chmod|chown)\b/i;
+const STOP_WORDS = new Set(['launch', 'open', 'start', 'run', 'the', 'app', 'desktop', 'application', 'please', 'and', 'then', 'with', 'for', 'this', 'that', 'from', 'into', 'bring', 'switch']);
+
+function goalWords(goal) {
+  return String(goal || '').toLowerCase().split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+}
+
+function relatedToGoal(text, goal) {
+  const hay = String(text || '').toLowerCase();
+  return goalWords(goal).some((w) => hay.includes(w));
+}
+
+function commandSegments(cmd) {
+  return String(cmd || '').split(/\s*(?:;|&&|\|\||\||\r?\n)\s*/).map((s) => s.trim()).filter(Boolean);
+}
+
+function verbOf(segment) {
+  const stripped = segment.replace(/^\(+/, '').replace(/^\$\w+\s*=\s*/, '').replace(/^&\s*/, '');
+  const first = (stripped.match(/^"([^"]+)"|^'([^']+)'|^(\S+)/) || []);
+  return String(first[1] || first[2] || first[3] || '').toLowerCase().replace(/^.*[\\/]/, '');
+}
+
+// A command is auto-approvable when every segment is either read-only or a
+// launch of something the user named, and nothing in it writes or reaches out.
+function shellAutoApprove(command, goal) {
+  const plain = plainCommand({ command });
+  if (!plain || />|2>|\bout-file\b/i.test(plain)) return false;
+  if (DENY_TOKENS.test(plain)) return false;
+  const segments = commandSegments(plain);
+  if (!segments.length) return false;
+  let launches = false;
+  for (const seg of segments) {
+    const verb = verbOf(seg);
+    if (READ_ONLY_VERBS.has(verb)) continue;
+    if (LAUNCH_VERBS.has(verb)) { launches = true; continue; }
+    return false;
+  }
+  return launches ? relatedToGoal(plain, goal) : true;
+}
+
+const OPEN_INTENT = /\b(launch|open|start|switch to|bring up|focus|show)\b/i;
+
+function autoApprove(call, goal) {
+  const name = String((call && call.name) || '');
+  const input = (call && call.input) || {};
+  if (name === 'desktop_run_command' || name === 'runInTerminal') {
+    return shellAutoApprove(input.command, goal);
+  }
+  if (name === 'desktop_go' || name === 'desktop_look_click' || name === 'desktop_uia_invoke') {
+    const target = input.text || input.label || (input.selector && input.selector.name) || '';
+    return Boolean(target) && OPEN_INTENT.test(String(goal || '')) && relatedToGoal(target, goal);
+  }
+  return false;
+}
+
 async function confirmWithUser(vscode, state, call) {
   if (state.approveAll) return true;
+  if (autoApprove(call, state.goal)) return true;
   const win = vscode && vscode.window;
   if (!win || typeof win.showWarningMessage !== 'function') return false;
   const { message, detail } = approvalText(call);
@@ -648,7 +724,8 @@ async function handleTurn({
     let rounds = 0;
     let done = false;
     // "Approve all this turn" means the whole @at turn, outer rounds included.
-    const approvals = {};
+    // The goal is what "related to their objective" is judged against.
+    const approvals = { goal: userLine };
     for (let i = 0; i < MAX_ROUNDS; i += 1) {
       if (token && token.isCancellationRequested) {
         return resultMeta(lastTurn || { session_id: sessionId }, { error: 'cancelled' });
@@ -796,6 +873,8 @@ module.exports = {
   invokeTool,
   approvalText,
   plainCommand,
+  autoApprove,
+  shellAutoApprove,
   APPROVE_ONE,
   APPROVE_TURN,
 };

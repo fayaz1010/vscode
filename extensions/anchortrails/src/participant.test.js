@@ -852,6 +852,57 @@ describe('the tool loop', () => {
     assert.match(nav.detail, /example\.com\/form/);
   });
 
+  it('auto-approves reads and launches the user asked for; asks for everything else', () => {
+    // "skip approval for app launches and no intrusive things, if related to
+    // their objective"
+    const { autoApprove, shellAutoApprove } = require('./participant');
+    const goal = 'launch claude desktop';
+    const launch = 'powershell -NoProfile -Command "$a = Get-StartApps | Where-Object Name -eq Claude; Start-Process shell:AppsFolder\\$($a.AppID)"';
+    assert.equal(shellAutoApprove(launch, goal), true);
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "Get-Process | Where-Object { $_.ProcessName -match claude }"', goal), true);
+    assert.equal(shellAutoApprove('where.exe claude', ''), true, 'reading needs no objective');
+    assert.equal(shellAutoApprove('Start-Process notepad.exe', goal), false, 'launching something the user did not ask for');
+    assert.equal(shellAutoApprove('Start-Process notepad.exe', 'open notepad and type hello'), true);
+    assert.equal(shellAutoApprove('Remove-Item C:\\claude -Recurse', goal), false, 'related but destructive');
+    assert.equal(shellAutoApprove('Get-Process claude > out.txt', goal), false, 'redirection writes');
+    assert.equal(shellAutoApprove('Stop-Process -Name claude', goal), false);
+    assert.equal(shellAutoApprove('Invoke-WebRequest https://x/claude.exe', goal), false, 'network');
+    assert.equal(shellAutoApprove('winget install Anthropic.Claude', goal), false, 'installs');
+    assert.equal(shellAutoApprove('Start-Process claude.exe -Verb RunAs', goal), false, 'elevation');
+    assert.equal(shellAutoApprove('', goal), false);
+    assert.equal(autoApprove({ name: 'desktop_run_command', input: { command: launch } }, goal), true);
+    assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'claude' } }, goal), false, 'unknown verb, and interactive');
+    assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude Desktop (plain)' } }, goal), true, 'clicking the app you asked to open');
+    assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Submit' } }, goal), false);
+    assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude' } }, 'fill the claude form and submit'), false, 'no open intent in the goal');
+    assert.equal(autoApprove({ name: 'browser_fill_editor', input: { text: 'claude' } }, goal), false, 'typing always asks');
+    assert.equal(autoApprove({ name: 'browser_navigate', input: { url: 'https://claude.ai' } }, goal), false, 'browser always asks');
+  });
+
+  it('an auto-approved call re-invokes with approve=true and never shows the modal', async () => {
+    const { invokeTool } = require('./participant');
+    const invoked = [];
+    let asked = 0;
+    const vscode = {
+      lm: {
+        async invokeTool(name, opts) {
+          invoked.push(opts.input);
+          if (!opts.input.approve) return { content: [{ value: '{"approval_required":true}' }] };
+          return { content: [{ value: '{"exit_code":0,"stdout":"started"}' }] };
+        },
+      },
+      window: { async showWarningMessage() { asked += 1; return undefined; } },
+    };
+    const out = await invokeTool(vscode, {}, {
+      callId: 'a', name: 'desktop_run_command',
+      input: { command: 'powershell -NoProfile -Command "Start-Process shell:AppsFolder\\com.squirrel.AnthropicClaude.claude"' },
+    }, undefined, { goal: 'launch claude desktop' });
+    assert.equal(asked, 0);
+    assert.equal(invoked.length, 2);
+    assert.equal(invoked[1].approve, true);
+    assert.match(out, /started/);
+  });
+
   it('a non-mutating result never prompts', async () => {
     const { invokeTool } = require('./participant');
     let asked = 0;
