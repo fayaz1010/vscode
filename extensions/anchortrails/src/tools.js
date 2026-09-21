@@ -134,18 +134,25 @@ const DEST_ALWAYS = [
     // finds something or it doesn't, with no UI tree to walk and no fuzzy
     // name to match. Give the model a deterministic way to check first,
     // rather than reaching straight for fuzzy on-screen search.
+    // Live: the model's first call was bare PowerShell and died with exit
+    // 255 -- on Windows the backend runs the string through cmd.exe. The
+    // wrapped calls that followed worked. Say so, with the one-line launch
+    // that Claude Code / Cursor / Codex would use.
     description: (
       'Run one shell command and read its real stdout/stderr/exit code -- '
-      + 'no UI tree, no guessing. Use to check whether an app is installed '
-      + '(where.exe, Get-Command), find its real path, or check whether a '
-      + 'process is already running (Get-Process), before searching for it '
-      + 'on screen with desktop_uia_find. Refuses commands that synthesize '
-      + 'keyboard or mouse input.'
+      + 'no UI tree, no guessing. FIRST choice to launch, close or find an '
+      + 'app, a file or a process: one command does it, no look, no click. '
+      + 'Windows runs cmd.exe -- wrap PowerShell as '
+      + 'powershell -NoProfile -Command "Start-Process shell:AppsFolder\\<AppID>" '
+      + 'or "Start-Process <exe>"; find the AppID with Get-StartApps. '
+      + 'Never start an interactive program (claude, vim, a REPL): it hangs '
+      + 'until the timeout. Refuses commands that synthesize keyboard or '
+      + 'mouse input.'
     ),
     inputSchema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'Shell command to run, e.g. "where.exe claude" or "Get-Process claude".' },
+        command: { type: 'string', description: 'Shell command, e.g. powershell -NoProfile -Command "Get-Process claude" or "where.exe claude".' },
         cwd: { type: 'string', description: 'Working directory. Optional.' },
         timeout_seconds: { type: 'integer', description: 'Kill the command after this long. Default 30.' },
       },

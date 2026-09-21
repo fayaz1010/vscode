@@ -418,6 +418,12 @@ function ledgerSummary(text) {
       if (typeof p.match_count === 'number') return `${p.match_count} match${p.match_count === 1 ? '' : 'es'}`;
       if (p.timed_out === true) return 'timed out';
       if (typeof p.exit_code === 'number') return `exit ${p.exit_code}${p.stdout ? `: ${oneLine(p.stdout, RESULT_CLIP)}` : ''}`;
+      // runInTerminal: {ok, exit, stdout, stderr}. "failed" alone hid why
+      // `claude` failed (it is the CLI, it waited for input, it timed out).
+      if (typeof p.exit === 'number') {
+        const tail = p.stdout || p.stderr;
+        return `exit ${p.exit}${tail ? `: ${oneLine(tail, RESULT_CLIP)}` : ''}`;
+      }
       if (p.ok === true) return 'ok';
       if (p.ok === false) return `failed${p.reason ? `: ${oneLine(p.reason, RESULT_CLIP)}` : ''}`;
     }

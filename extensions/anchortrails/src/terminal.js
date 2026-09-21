@@ -39,7 +39,10 @@ function spec() {
     name: BUILTIN_TERMINAL,
     description: (
       'Run a command in dest\'s Terminal panel and return stdout/stderr. '
-      + 'Never ask the user to paste dir/cat/ls output. Use this instead.'
+      + 'Never ask the user to paste dir/cat/ls output. Use this instead. '
+      + 'Non-interactive only: a program that waits for input (claude, vim, '
+      + 'a REPL) hangs until the 60s timeout and fails. To open a desktop '
+      + 'app use desktop_run_command with Start-Process.'
     ),
     inputSchema: SCHEMA,
   };

@@ -760,6 +760,10 @@ describe('the tool loop', () => {
     assert.ok(!multi.slice(2).includes('\n'), 'summary must stay on one line');
     assert.match(multi, /→ exit 0: Name : Claude AppID : com\.x Name : Other\*$/);
     assert.match(ledgerLine({ name: 'desktop_run_command', input: {} }, '{"command":"x","exit_code":null,"timed_out":true}'), /→ timed out\*$/);
+    // runInTerminal's shape is {ok, exit, stdout, stderr}; "→ failed" alone
+    // hid that `claude` (the CLI) sat waiting for input until the timeout.
+    assert.match(ledgerLine({ name: 'runInTerminal', input: {} }, '{"ok":false,"exit":1,"stdout":"","stderr":"killed: timeout"}'), /→ exit 1: killed: timeout\*$/);
+    assert.match(ledgerLine({ name: 'runInTerminal', input: {} }, '{"ok":true,"exit":0,"stdout":"v1.2\\n","stderr":""}'), /→ exit 0: v1\.2\*$/);
   });
 
   it('approval_required pauses for the person, then re-invokes with approve=true', async () => {
