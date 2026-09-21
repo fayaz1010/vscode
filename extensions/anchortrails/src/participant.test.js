@@ -645,7 +645,7 @@ describe('the tool loop', () => {
     assert.equal(invoked.length, 1);
     assert.equal(invoked[0].name, 'desktop_uia_find');
     assert.deepEqual(invoked[0].input, { query: 'claude' });
-    assert.deepEqual(invoked[0].token, { session: 's' });
+    assert.equal(invoked[0].token, undefined, 'no toolInvocationToken: the chat would render a second widget per call');
     assert.equal(sends.length, 2);
     const second = sends[1].messages;
     assert.equal(second.length, 3);
@@ -689,6 +689,44 @@ describe('the tool loop', () => {
     });
     assert.equal(invoked.length, MAX_TOOL_ROUNDS);
     assert.match(response.parts.join(''), new RegExp(`Stopped after ${MAX_TOOL_ROUNDS} tool rounds`));
+  });
+
+  it('a computer task ends after the round that ran real tools -- no "Continue..." re-prompt', async () => {
+    // Live: the app was open and the model had said so; the outer per-step
+    // loop still sent "Continue this computer-use task..." and a fresh
+    // round started over -- runInTerminal claude, three malformed finds.
+    const { vscode, sends, invoked } = toolHost({
+      onInvoke: () => ({ content: [{ value: '{"count":1}' }] }),
+      replies: [
+        [{ callId: 'c1', name: 'desktop_uia_find', input: { selector: { name: 'Claude' } } }],
+        [{ value: 'Claude Desktop is open.' }],
+      ],
+    });
+    const prepares = [];
+    const plans = [];
+    const client = {
+      async prepare(body) {
+        prepares.push(body.ahead);
+        return prepared({
+          task_class: 'computer',
+          tools_required: true,
+          turn: { goal: 'launch claude desktop', cursor: '1/3', playbook: 'computer', steps: '1.LOOK [>] | 2.ACT [ ] | 3.VERIFY [ ]' },
+        });
+      },
+    };
+    const response = stream();
+    const result = await handleTurn({
+      client, vscode, request: { prompt: 'launch claude desktop' }, context: { history: [] }, response,
+      onPlan: (p) => plans.push(p),
+    });
+    assert.equal(prepares.length, 1, 'one prepare: no outer re-prompt after the tool round');
+    assert.equal(sends.length, 2, 'one tool round, one final answer');
+    assert.equal(invoked.length, 1);
+    assert.equal(result.metadata.drive.kind, 'computer');
+    assert.equal(result.metadata.drive.done, true);
+    assert.equal(result.metadata.drive.cursor, '3/3');
+    assert.match(plans[plans.length - 1].steps, /1\.LOOK \[x\] \| 2\.ACT \[x\] \| 3\.VERIFY \[x\]/);
+    assert.match(response.parts.join(''), /Claude Desktop is open\.$/);
   });
 
   it('a text-only reply never enters the loop', async () => {

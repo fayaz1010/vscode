@@ -98,3 +98,15 @@ describe('plan drive loop', () => {
     assert.match(line, /Do not wait for another prompt/);
   });
 });
+
+describe('finishPlan', () => {
+  it('marks every step done and moves the cursor to the end', () => {
+    const { finishPlan } = require('./plan_loop');
+    const out = finishPlan({ goal: 'g', cursor: '1/3', steps: '1.LOOK [>] | 2.ACT [ ] | 3.VERIFY [ ]' });
+    assert.equal(out.steps, '1.LOOK [x] | 2.ACT [x] | 3.VERIFY [x]');
+    assert.equal(out.cursor, '3/3');
+    assert.equal(out.goal, 'g');
+    assert.deepEqual(finishPlan({ goal: 'g' }), { goal: 'g' });
+    assert.deepEqual(finishPlan(null), {});
+  });
+});

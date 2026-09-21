@@ -23,6 +23,7 @@ const {
   driveKind,
   destCheck,
   advanceLocal,
+  finishPlan,
   isDone,
   nextAhead,
   doneMarkdown,
@@ -313,16 +314,17 @@ function toolResultText(result) {
   }
 }
 
-async function invokeOnce(vscode, request, name, input, token) {
+// No toolInvocationToken on purpose: with one, the chat renders its own
+// collapsible "Finished with N steps" widget per call on top of the ledger
+// line below -- two entries per call, which read as "a lot of streams".
+// The ledger line carries the result; the widget did not.
+async function invokeOnce(vscode, name, input, token) {
   const lm = vscode && vscode.lm;
   if (!lm || typeof lm.invokeTool !== 'function') {
     return JSON.stringify({ error: `tool ${name} is not invokable in this host` });
   }
   try {
-    const result = await lm.invokeTool(name, {
-      input,
-      toolInvocationToken: request && request.toolInvocationToken,
-    }, token);
+    const result = await lm.invokeTool(name, { input }, token);
     return toolResultText(result);
   } catch (err) {
     return JSON.stringify({ error: String((err && err.message) || err) });
@@ -365,8 +367,8 @@ async function confirmWithUser(vscode, state, call) {
   return picked === APPROVE_ONE || picked === APPROVE_TURN;
 }
 
-async function invokeTool(vscode, request, call, token, state = {}) {
-  const first = await invokeOnce(vscode, request, call.name, call.input, token);
+async function invokeTool(vscode, _request, call, token, state = {}) {
+  const first = await invokeOnce(vscode, call.name, call.input, token);
   if (!approvalRequired(first)) return first;
   const ok = await confirmWithUser(vscode, state, call);
   if (!ok) {
@@ -376,7 +378,7 @@ async function invokeTool(vscode, request, call, token, state = {}) {
       hint: 'the user did not approve this action; do not retry it, say what was not done',
     });
   }
-  return invokeOnce(vscode, request, call.name, { ...(call.input || {}), approve: true }, token);
+  return invokeOnce(vscode, call.name, { ...(call.input || {}), approve: true }, token);
 }
 
 // Real part classes when the host has them: the extension host converts
@@ -431,7 +433,7 @@ function ledgerLine(call, text) {
 }
 
 async function runModelRound({
-  client, vscode, turn, prompt, token, response, toolSession, catalog, request,
+  client, vscode, turn, prompt, token, response, toolSession, catalog, request, approvals = {},
 }) {
   const bound = toolSession
     ? toolSession.bind(vscode, client, turn.tools, catalog)
@@ -457,7 +459,6 @@ async function runModelRound({
   const messages = [...(turn.messages || [])];
   let wroteAny = false;
   let toolRounds = 0;
-  const approvals = {};
   // One progress line for the whole round. A progress() per call made the
   // chat collapse each ledger line into its own "Finished with 1 step" group.
   if (response && typeof response.progress === 'function') {
@@ -608,6 +609,8 @@ async function handleTurn({
     let stuck = 0;
     let rounds = 0;
     let done = false;
+    // "Approve all this turn" means the whole @at turn, outer rounds included.
+    const approvals = {};
     for (let i = 0; i < MAX_ROUNDS; i += 1) {
       if (token && token.isCancellationRequested) {
         return resultMeta(lastTurn || { session_id: sessionId }, { error: 'cancelled' });
@@ -631,12 +634,20 @@ async function handleTurn({
       const turn = buildTurn(prepared, ahead, context && context.history);
       lastTurn = turn;
       const ran = await runModelRound({
-        client, vscode, turn, prompt: ahead, token, response, toolSession, catalog, request,
+        client, vscode, turn, prompt: ahead, token, response, toolSession, catalog, request, approvals,
       });
       if (ran.cancelled) return resultMeta(turn, { error: 'cancelled' });
       if (ran.error) return resultMeta(turn, { error: ran.error });
       rounds += 1;
       if (!kind) break;
+      if (kind === 'computer' && ran.toolRounds > 0) {
+        drivePlan = finishPlan((prepared && prepared.turn) || drivePlan);
+        if (typeof onPlan === 'function') {
+          try { onPlan({ ...drivePlan, turn: drivePlan }); } catch { /* Plan panel is optional */ }
+        }
+        done = true;
+        break;
+      }
       drivePlan = kind === 'session'
         ? ((prepared && prepared.plan) || drivePlan)
         : ((prepared && prepared.turn) || drivePlan);

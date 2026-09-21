@@ -59,6 +59,17 @@ function advanceLocal(plan, check) {
   return { ...plan, steps: parts.join(' | '), cursor: cursorOf(parts) };
 }
 
+// A computer-use task now completes inside ONE model round (the tool loop
+// looks, acts, verifies, answers). Marching the outer per-step rounds after
+// that re-prompted "Continue..." to a model that had already reported the
+// app open, and it started over -- live: a second pass ran `runInTerminal
+// claude` (the CLI, not the app) and three malformed finds.
+function finishPlan(plan) {
+  const parts = parseSteps(plan && plan.steps).map((s) => stampMark(s, '[x]'));
+  if (!parts.length) return { ...(plan || {}) };
+  return { ...plan, steps: parts.join(' | '), cursor: `${parts.length}/${parts.length}` };
+}
+
 function wantsObjective(prompt) {
   return WANT.test(String(prompt || ''));
 }
@@ -149,6 +160,7 @@ module.exports = {
   isOpen,
   currentStep,
   advanceLocal,
+  finishPlan,
   wantsObjective,
   isQuietPrompt,
   isRefreshPrompt,
