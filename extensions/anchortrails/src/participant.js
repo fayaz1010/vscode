@@ -359,7 +359,10 @@ const SHELL_WRAP = /^\s*(?:powershell(?:\.exe)?|pwsh)\s+(?:-\w+\s+)*-c(?:ommand)
 function plainCommand(input) {
   const raw = String((input && input.command) || '').trim();
   const m = raw.match(SHELL_WRAP);
-  return (m ? m[1] : raw).replace(/\s+/g, ' ').trim();
+  // Inside a `powershell -Command "..."` wrapper the inner quotes arrive
+  // escaped as \" -- a person reads `"claude.exe"`, not `\"claude.exe\"`,
+  // and the verb finder must not see a lone backslash as the last token.
+  return (m ? m[1] : raw).replace(/\\"/g, '"').replace(/\s+/g, ' ').trim();
 }
 
 function approvalText(call) {
@@ -398,15 +401,20 @@ function approvalText(call) {
 const READ_ONLY_VERBS = new Set([
   'get-process', 'get-startapps', 'get-command', 'get-childitem', 'get-item',
   'get-content', 'get-date', 'get-location', 'get-ciminstance', 'get-service',
-  'get-nettcpconnection', 'get-volume', 'get-psdrive', 'test-path',
-  'resolve-path', 'select-object', 'where-object', 'sort-object', 'format-list',
-  'format-table', 'measure-object', 'out-string', 'write-output', 'write-host',
-  'select-string', 'foreach-object', 'where.exe', 'where', 'dir', 'ls', 'type',
-  'cat', 'echo', 'hostname', 'whoami', 'tasklist', 'findstr', 'grep', 'head',
-  'tail', 'pwd', 'ver', 'systeminfo', 'ps', 'which', 'find', 'wc', 'uname',
-  'start-sleep', 'sleep',
+  'get-nettcpconnection', 'get-volume', 'get-psdrive', 'get-itemproperty',
+  'get-appxpackage', 'get-package', 'get-host', 'get-variable', 'test-path',
+  'resolve-path', 'join-path', 'split-path', 'convertto-json', 'convertfrom-json',
+  'select-object', 'where-object', 'sort-object', 'format-list', 'format-table',
+  'measure-object', 'out-string', 'out-null', 'write-output', 'write-host',
+  'select-string', 'foreach-object', 'start-sleep', 'sleep', 'where.exe', 'where',
+  'dir', 'ls', 'type', 'cat', 'echo', 'hostname', 'whoami', 'tasklist', 'findstr',
+  'grep', 'head', 'tail', 'pwd', 'ver', 'systeminfo', 'ps', 'which', 'find', 'wc',
+  'uname', 'true', 'exit', 'return',
 ]);
-const LAUNCH_VERBS = new Set(['start-process', 'start', 'open', 'xdg-open', 'explorer', 'explorer.exe']);
+// Flow-control keywords wrap the real verbs: "if (-not $p) { Start-Process ... }".
+const CONTROL_VERBS = new Set(['if', 'else', 'elseif', 'try', 'catch', 'finally', 'foreach', 'for', 'while', 'do', 'switch', 'function', 'param', 'begin', 'process', 'end', '{', '}', '(', ')']);
+const LAUNCH_VERBS = new Set(['start-process', 'start', 'open', 'xdg-open', 'explorer', 'explorer.exe', 'invoke-item']);
+const LAUNCH_INSIDE = /\b(start-process|invoke-item|explorer(?:\.exe)?\s+shell:|shell:appsfolder)\b/i;
 // Bare `format` and `sc` used to be in here and matched Format-Table and
 // Select-Object's neighbours -- the verify command of the first hands-off
 // run ("Get-Process | ... | Format-Table") got a modal for it. Word-boundary
@@ -429,15 +437,19 @@ function commandSegments(cmd) {
 }
 
 function verbOf(segment) {
-  const stripped = segment.replace(/^\(+/, '').replace(/^\$\w+\s*=\s*/, '').replace(/^&\s*/, '');
+  const stripped = segment
+    .replace(/^[({]+\s*/, '')
+    .replace(/^\$[\w:]+\s*=\s*/, '')
+    .replace(/^&\s*/, '')
+    .replace(/^\.\s+/, '');
   const first = (stripped.match(/^"([^"]+)"|^'([^']+)'|^(\S+)/) || []);
   return String(first[1] || first[2] || first[3] || '').toLowerCase().replace(/^.*[\\/]/, '');
 }
 
-// A command is auto-approvable when every segment is either read-only or a
-// launch of something the user named, and nothing in it writes or reaches out.
-// Returns '' when the command may run without asking, else the reason it
-// must ask -- shown in the modal, so a person can see what tripped it.
+// '' when the command may run without asking, else the reason it must ask
+// -- shown in the modal, so a person can see what tripped it. The deny
+// list is the safety line; a verb nobody recognises is the other one,
+// unless that verb is the very thing the user asked to open (claude.exe).
 function shellAskReason(command, goal) {
   const plain = plainCommand({ command });
   if (!plain) return 'empty command';
@@ -446,12 +458,14 @@ function shellAskReason(command, goal) {
   if (deny) return `it uses "${deny[0].trim()}"`;
   const segments = commandSegments(plain);
   if (!segments.length) return 'empty command';
-  let launches = false;
+  let launches = LAUNCH_INSIDE.test(plain);
   for (const seg of segments) {
     const verb = verbOf(seg);
-    if (READ_ONLY_VERBS.has(verb)) continue;
+    if (!verb || READ_ONLY_VERBS.has(verb) || CONTROL_VERBS.has(verb)) continue;
+    if (/^[-$@'"(]/.test(verb)) continue; // an expression, an argument, a variable
     if (LAUNCH_VERBS.has(verb)) { launches = true; continue; }
-    return `"${verb || seg.slice(0, 30)}" is not a read or a launch I recognise`;
+    if (relatedToGoal(verb, goal)) { launches = true; continue; } // "& claude.exe"
+    return `"${verb}" is not a read or a launch I recognise`;
   }
   if (launches && !relatedToGoal(plain, goal)) return 'it launches something you did not name';
   return '';

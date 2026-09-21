@@ -869,6 +869,12 @@ describe('the tool loop', () => {
     assert.equal(shellAutoApprove('Invoke-WebRequest https://x/claude.exe', goal), false, 'network');
     assert.equal(shellAutoApprove('winget install Anthropic.Claude', goal), false, 'installs');
     assert.equal(shellAutoApprove('Start-Process claude.exe -Verb RunAs', goal), false, 'elevation');
+    // shapes a model actually reaches for
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "$p = Get-Process claude -ErrorAction SilentlyContinue; if (-not $p) { Start-Process shell:AppsFolder\\com.squirrel.AnthropicClaude.claude }; Start-Sleep -Seconds 3; Get-Process claude | Select-Object Id, MainWindowTitle"', goal), true, 'if/else around a launch');
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "& \\"$env:LOCALAPPDATA\\AnthropicClaude\\claude.exe\\""', goal), true, 'running the named exe directly');
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "& \\"$env:LOCALAPPDATA\\Programs\\notepad.exe\\""', goal), false, 'an exe the user did not name');
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "Get-StartApps | Where-Object { $_.Name -like \'*Claude*\' } | Select-Object -First 1 | ForEach-Object { Start-Process (\'shell:AppsFolder\\\' + $_.AppID) }"', goal), true, 'launch inside a ForEach block');
+    assert.equal(shellAutoApprove('powershell -NoProfile -Command "try { Start-Process claude } catch { Write-Output failed }"', goal), true, 'try/catch');
     assert.equal(shellAutoApprove('', goal), false);
     // the verify command of the first hands-off run: Format-Table is not `format C:`
     assert.equal(shellAutoApprove('powershell -NoProfile -Command "Get-Process | Where-Object { $_.ProcessName -match claude } | Select-Object ProcessName, Id, MainWindowTitle | Format-Table -AutoSize"', goal), true);
@@ -878,10 +884,12 @@ describe('the tool loop', () => {
     const { shellAskReason, approvalText } = require('./participant');
     assert.equal(shellAskReason('Start-Process notepad.exe', goal), 'it launches something you did not name');
     assert.equal(shellAskReason('Remove-Item x', goal), 'it uses "Remove-Item"');
-    assert.equal(shellAskReason('claude', goal), '"claude" is not a read or a launch I recognise');
+    assert.equal(shellAskReason('notepad', goal), '"notepad" is not a read or a launch I recognise');
+    assert.equal(shellAskReason('claude', goal), '', 'a bare program the user named counts as launching it');
     assert.match(approvalText({ name: 'desktop_run_command', input: { command: 'Remove-Item x' }, goal }).detail, /Asking because it uses "Remove-Item"\.$/);
     assert.equal(autoApprove({ name: 'desktop_run_command', input: { command: launch } }, goal), true);
-    assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'claude' } }, goal), false, 'unknown verb, and interactive');
+    assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'claude' } }, goal), true, 'the program the user named; it may hang, it cannot hurt');
+    assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'notepad' } }, goal), false, 'a program the user did not name');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude Desktop (plain)' } }, goal), true, 'clicking the app you asked to open');
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Submit' } }, goal), false);
     assert.equal(autoApprove({ name: 'desktop_go', input: { text: 'Claude' } }, 'fill the claude form and submit'), false, 'no open intent in the goal');
