@@ -184,3 +184,43 @@ describe('one live line per state, with a spinner', () => {
     assert.deepEqual(r.parts, ['[map…]', '[plan…]']);
   });
 });
+
+describe('a job outlives the turn that started it', () => {
+  it('attach follows a job already in flight, and gives up at once when there is none', async () => {
+    // Live: the dev host was relaunched three times while run 2 kept going, so
+    // the run had nobody watching it. /run (or /run status) should pick it up.
+    const answers = [
+      { running: true, progress: { task: 't.ops-center.tsx', attempt: 3, phase: 'asking the model' }, run: { status: 'running', results: [] } },
+      { running: false, run: { status: 'complete', closed: 1, cost_usd: 0.2, results: [{ task: 't.ops-center.tsx', outcome: 'closed', attempts: 3, cost_usd: 0.2 }] } },
+    ];
+    let i = 0;
+    const live = { async map() { return answers[Math.min(i++, answers.length - 1)]; } };
+    const r1 = stream();
+    const on = await streamJob({ client: live, repo: 'x', kind: 'run', response: r1, attach: true, sleep: async () => {} });
+    assert.equal(on.ended, 'done');
+    assert.match(r1.parts.join('\n'), /ops-center\.tsx · attempt 3 · asking the model/);
+    assert.match(r1.parts.join('\n'), /✓ ops-center\.tsx — closed after 3 attempts/);
+
+    let reads = 0;
+    const idle = { async map() { reads += 1; return { running: false, run: { status: 'complete', results: [] } }; } };
+    const r2 = stream();
+    const off = await streamJob({ client: idle, repo: 'x', kind: 'run', response: r2, attach: true, sleep: async () => {} });
+    assert.equal(off.ended, 'done');
+    assert.equal(reads, 1, 'nothing is running: one read and out, no eight-second wait');
+    assert.deepEqual(r2.parts, []);
+  });
+
+  it('a job we started is still given time to raise its flag', async () => {
+    let reads = 0;
+    const slow = {
+      async map() {
+        reads += 1;
+        if (reads < 3) return { running: false, run: { status: 'complete', results: [] } };
+        return { running: false, run: { status: 'complete', closed: 1, results: [{ task: 't.a', outcome: 'closed', attempts: 1 }] } };
+      },
+    };
+    const r = stream();
+    await streamJob({ client: slow, repo: 'x', kind: 'run', response: r, sleep: async () => {} });
+    assert.ok(reads >= 3, 'two quiet reads are allowed before giving up on a job we just started');
+  });
+});

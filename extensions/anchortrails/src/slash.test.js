@@ -56,7 +56,9 @@ describe('what the chat says for /map and /run', () => {
   const { mapActionMarkdown } = require('./slash');
   it('reports a start, and a refusal in the bridge\'s own words', () => {
     assert.match(mapActionMarkdown('map', { ok: true, started: true }), /Re-map started/);
-    assert.match(mapActionMarkdown('map', { ok: false, reason: 'a re-map is already running (pid 7)' }), /already running \(pid 7\)/);
+    const busy = mapActionMarkdown('map', { ok: false, reason: 'a re-map is already running (pid 7)' });
+    assert.match(busy, /already running \(pid 7\)/, "the bridge's own words, pid and all");
+    assert.match(busy, /following it here/, 'and why the lines below are about it');
     assert.match(mapActionMarkdown('run', { ok: true, started: true }), /Run started/);
     assert.match(mapActionMarkdown('run', { ok: false, reason: 'no plan beside the map; plan first' }), /plan first/);
   });

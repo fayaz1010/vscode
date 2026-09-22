@@ -103,7 +103,11 @@ function jobAlive(map, kind) {
   return Boolean(m[JOB_FLAG[kind]]);
 }
 
-async function streamJob({ client, repo, kind, response, token, pollMs = Number(process.env.AT_JOB_POLL_MS) || DEFAULT_POLL_MS, maxMs = DEFAULT_MAX_MS, sleep, now }) {
+// `attach` follows a job this turn did not start -- a run survives a cancelled
+// turn or a relaunched window, and the person who comes back should still see
+// it. The difference is only patience: a job we just started is given a couple
+// of reads to raise its flag, one we are merely attaching to must already be up.
+async function streamJob({ client, repo, kind, response, token, attach = false, pollMs = Number(process.env.AT_JOB_POLL_MS) || DEFAULT_POLL_MS, maxMs = DEFAULT_MAX_MS, sleep, now }) {
   const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const clock = now || (() => Date.now());
   if (!client || typeof client.map !== 'function' || !response) return { lines: 0, ended: 'no-client' };
@@ -133,7 +137,7 @@ async function streamJob({ client, repo, kind, response, token, pollMs = Number(
       const events = diffEvents(prev, map, kind);
       for (const line of events) { response.markdown(`\n${line}`); lines += 1; }
       const alive = jobAlive(map, kind);
-      if (alive) { started = true; idle = 0; } else if (started || idle >= 2) {
+      if (alive) { started = true; idle = 0; } else if (started || idle >= (attach ? 0 : 2)) {
         // The job's flag is down and we saw it up (or never came up after two
         // reads): it is over. One last diff already ran above.
         say.end();

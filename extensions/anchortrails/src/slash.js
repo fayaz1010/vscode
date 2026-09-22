@@ -55,6 +55,11 @@ function planTag(request) {
 // ("a plan run is already running (pid 7)"), not a generic failure.
 function mapActionMarkdown(kind, out) {
   const o = out || {};
+  // Not a failure, and not a reason to say nothing: the work is under way and
+  // the turn attaches to it below, so the lines that follow are that job's.
+  if (!o.ok && /already running/i.test(String(o.reason || ''))) {
+    return `${o.reason} — following it here.`;
+  }
   if (kind === 'map') {
     if (o.ok && o.current) return `The map is current (${String(o.head || '').slice(0, 8)}). \`/map force\` rebuilds it anyway.`;
     return o.ok

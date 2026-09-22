@@ -879,12 +879,16 @@ async function handleTurn({
         out = client && typeof client.mapApply === 'function' ? await client.mapApply({ repo }) : { ok: false, reason: 'no bridge' };
       }
       response.markdown(mapActionMarkdown(kind, out));
-      // KEEP TALKING WHILE IT WORKS. A started job streams one line per event --
-      // stage, task phase, close/fail with cost, ship step -- until its flag goes
-      // down, so the person never has to open the panel to know what happened.
-      if (out && out.ok && !out.current && ['map', 'plan', 'run', 'ship'].includes(kind)) {
+      // KEEP TALKING WHILE IT WORKS -- whoever started it. A job streams one line
+      // per event (stage, task phase, close/fail with cost, ship step) until its
+      // flag goes down. A run outlives the turn that started it: cancel the turn
+      // or relaunch the window and it keeps going with nobody watching, so any of
+      // these commands ATTACHES to one already in flight rather than only
+      // narrating one it started itself. `/run status` is the plain way to ask.
+      const WATCHABLE = { map: 'map', plan: 'plan', run: 'run', ship: 'ship', status: 'run' };
+      if (WATCHABLE[kind] && !(out && out.current)) {
         const { streamJob } = require('./job_stream');
-        await streamJob({ client, repo, kind, response, token });
+        await streamJob({ client, repo, kind: WATCHABLE[kind], response, token, attach: !(out && out.ok) });
       }
       return { metadata: { slash: kind, session_id: sessionId } };
     }
