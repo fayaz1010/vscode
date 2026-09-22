@@ -230,3 +230,37 @@ describe('the file under the pen', () => {
     assert.match(svg, /· writing lib\/admin\/payments\.ts<\/title>/);
   });
 });
+
+describe('the plan lands like a stream, under its nodes', () => {
+  const { dashboardHtml } = require('./dashboard');
+  const { graphSvg } = require('./map_graph');
+  const esc = (v) => String(v ?? '');
+  const overview = { meta: {}, zones: [{ zone: '<root>', slug: 'root', files: 1 }, { zone: 'lib', slug: 'lib', files: 3 }, { zone: 'lib/admin', slug: 'lib-admin', files: 2, colour: 0.6 }], zone_edges: [] };
+
+  it('while planning, the partial plan stands in and says how far it got', () => {
+    const map = { ok: true, planning: true, overview, plan: null,
+      plan_partial: { status: 'planning', stage: 'selected', tasks_expected: 3, tasks: [
+        { id: 't.lib-admin-payments.ts', title: 'lib/admin/payments.ts: build', state: 'planning', deliverables: ['AlipayWeChatCheckoutService (objective_gap, line 1)'], execution: { write_scope: ['lib/admin/payments.ts'] } },
+      ] } };
+    const html = dashboardHtml(map, esc);
+    assert.match(html, /planning… 1 of 3 tasks so far · selected/);
+    assert.match(html, /<details class="dzone" open><summary>[^<]*<span class="mdot"[^>]*><\/span>lib\/admin <span class="muted">· 1 task<\/span><\/summary>/);
+    assert.match(html, /AlipayWeChatCheckoutService/);
+  });
+
+  it('a finished plan is grouped under zones and the graph badges each zone with its count', () => {
+    const map = { ok: true, overview, plan: { revision: 1, tasks: [
+      { id: 't.lib-admin-payments.ts', title: 'lib/admin/payments.ts: build', deliverables: [], execution: { write_scope: ['lib/admin/payments.ts'] } },
+      { id: 't.lib-admin-logistics.ts', title: 'lib/admin/logistics.ts: build', deliverables: [], execution: { write_scope: ['lib/admin/logistics.ts'] } },
+      { id: 't.lib-x.ts', title: 'lib/x.ts: wire', deliverables: [], execution: { write_scope: ['lib/x.ts'] } },
+    ] } };
+    const html = dashboardHtml(map, esc);
+    assert.ok(!/planning…/.test(html));
+    assert.match(html, /lib\/admin <span class="muted">· 2 tasks<\/span>/);
+    assert.match(html, />lib <span class="muted">· 1 task<\/span>/);
+    const svg = graphSvg(overview, esc, { tasksByZone: { 'lib-admin': 2, lib: 1 } });
+    assert.match(svg, /<title>2 tasks planned here<\/title>/);
+    assert.match(svg, /<title>1 task planned here<\/title>/);
+    assert.ok(!/planned here.*planned here.*planned here/s.test(svg), 'root has no badge');
+  });
+});

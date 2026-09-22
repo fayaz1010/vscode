@@ -129,6 +129,14 @@ function graphSvg(overview, esc, opts = {}) {
   const edgeHtml = edges.map((e) => `<line x1="${X(nodes[e.a].x)}" y1="${Y(nodes[e.a].y)}" x2="${X(nodes[e.b].x)}" y2="${Y(nodes[e.b].y)}" stroke="#3a4150" stroke-width="${e.width.toFixed(2)}"/>`).join('');
   const live = String(opts.live || '');
   const liveZone = live ? zoneOfFile(live, zones) : '';
+  // THE PLAN ON THE MAP: how many tasks each zone holds, as a small count on the node.
+  const tasksByZone = opts.tasksByZone || {};
+  const badge = (slug, n) => {
+    const k = Number(tasksByZone[slug] || 0);
+    if (!k) return '';
+    const bx = Number(X(n.x)) + n.r * 0.75; const by = Number(Y(n.y)) - n.r * 0.75;
+    return `<g class="mbadge"><title>${k} task${k === 1 ? '' : 's'} planned here</title><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="4.2" fill="#3794ff" stroke="#0f1218" stroke-width="0.6"/><text x="${bx.toFixed(1)}" y="${(by + 2.1).toFixed(1)}" text-anchor="middle" font-size="5.5" fill="#fff">${k}</text></g>`;
+  };
   const nodeHtml = nodes.map((n) => {
     const z = n.zone;
     const what = z.analysed === false
@@ -138,7 +146,7 @@ function graphSvg(overview, esc, opts = {}) {
       ? `<text x="${X(n.x)}" y="${(Number(Y(n.y)) + n.r + 10).toFixed(1)}" text-anchor="middle" font-size="9" fill="${z.analysed === false ? '#6b7484' : '#9aa3b2'}">${escape(String(z.zone).split('/').slice(-2).join('/'))}</text>`
       : '';
     return `<g class="mnode${z.analysed === false ? ' grey' : ''}${liveZone && z.slug === liveZone ? ' live' : ''}" data-zone="${escape(z.slug || '')}"><title>${escape(what)}${liveZone && z.slug === liveZone ? ` · writing ${escape(live)}` : ''}</title>`
-      + `<circle cx="${X(n.x)}" cy="${Y(n.y)}" r="${n.r.toFixed(1)}" fill="${n.fill}" stroke="#0f1218" stroke-width="0.8"/>${label}</g>`;
+      + `<circle cx="${X(n.x)}" cy="${Y(n.y)}" r="${n.r.toFixed(1)}" fill="${n.fill}" stroke="#0f1218" stroke-width="0.8"/>${label}${badge(z.slug, n)}</g>`;
   }).join('');
   const legend = '<div class="mlegend"><i style="background:#4a5160"></i>not analysed <i style="background:#2f6b3a"></i>nothing found <i style="background:#8a7b28"></i>moderate <i style="background:#c2811f"></i>high <i style="background:#e2533f"></i>worst · size = flagged symbols · lines = calls and imports between zones</div>';
   // The controls are wired by the shell's script: full screen (Esc closes), reset the

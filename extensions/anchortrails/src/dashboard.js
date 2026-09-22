@@ -12,7 +12,7 @@
  * Absent is a state: a folder with no map yet shows the buttons that make one.
  */
 const { runIndex, runMark, mapActions, shipLine, progressHtml, liveFile } = require('./plan');
-const { graphSvg } = require('./map_graph');
+const { graphSvg, zoneOfFile } = require('./map_graph');
 
 // "symbol (marker, line N)" -- the planner's deliverable line. The line is what makes
 // the row a link into the code; a deliverable that does not carry one links nowhere.
@@ -116,7 +116,10 @@ function dashboardHtml(map, esc, focusTask) {
   const zones = allZones.filter((z) => z.analysed !== false).sort((a, b) => (b.findings_total || 0) - (a.findings_total || 0));
   const grey = allZones.filter((z) => z.analysed === false);
   const shellOnly = meta.status === 'shell';
-  const tasks = map.plan && Array.isArray(map.plan.tasks) ? map.plan.tasks : [];
+  // THE PLAN AS FAR AS IT HAS GOT. While the planner runs, its partial plan (main
+  // tasks first, sub-tasks as they are built) stands in for the plan, and says so.
+  const partial = map.planning && map.plan_partial && Array.isArray(map.plan_partial.tasks) ? map.plan_partial : null;
+  const tasks = partial ? partial.tasks : (map.plan && Array.isArray(map.plan.tasks) ? map.plan.tasks : []);
   const runs = runIndex(map.run);
   const tot = runTotals(map.run);
   const building = !shellOnly && meta.status !== 'complete';
@@ -249,9 +252,26 @@ function dashboardHtml(map, esc, focusTask) {
       ${ds}
       <div class="meta">${escape(said)}${actual && budget ? ` <span class="dbudget">(est. up to ${escape(budget)})</span>` : ''}</div>
     </div>`;
+  });
+  // UNDER THEIR NODES. Tasks grouped by the zone their file belongs to, so the plan
+  // reads as the map does: zone, then its tasks, then each task's deliverables.
+  const zonesAll = (map.overview && map.overview.zones) || [];
+  const byZone = new Map();
+  tasks.forEach((t, i) => {
+    const z = zoneOfFile(taskPath(t), zonesAll) || '';
+    if (!byZone.has(z)) byZone.set(z, []);
+    byZone.get(z).push(i);
+  });
+  const grouped = [...byZone.entries()].map(([slug, idxs]) => {
+    const zone = zonesAll.find((z) => z.slug === slug);
+    const name = zone ? zone.zone : (slug || 'elsewhere');
+    return `<details class="dzone" open><summary><span class="mdot" style="background:${zone && Number(zone.colour || 0) >= 0.5 ? '#c2811f' : '#6b7484'}"></span>${escape(name)} <span class="muted">· ${idxs.length} task${idxs.length === 1 ? '' : 's'}</span></summary>${idxs.map((i) => taskRows[i]).join('')}</details>`;
   }).join('');
+  const planningNote = partial
+    ? `<p class="dplanning">planning… ${tasks.length}${partial.tasks_expected ? ` of ${partial.tasks_expected}` : ''} task${(partial.tasks_expected || tasks.length) === 1 ? '' : 's'} so far${partial.stage ? ` · ${escape(partial.stage)}` : ''}</p>`
+    : '';
   const taskList = tasks.length
-    ? `<h3>Tasks</h3>${taskRows}`
+    ? `<h3>Tasks</h3>${planningNote}${grouped}`
     : `<p class="muted">${objective ? 'No tasks yet — Plan makes them from the objective.' : 'No plan yet.'}</p>`;
 
   return `<section class="dash${building ? ' building' : ''}${map.running ? ' running' : ''}"><h3>Dashboard</h3>
@@ -261,7 +281,7 @@ function dashboardHtml(map, esc, focusTask) {
     ${shipLine(map, escape)}
     ${progressHtml(map, escape)}
     ${actions}
-    ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4, live: liveFile(map) })}
+    ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4, live: liveFile(map), tasksByZone: Object.fromEntries([...byZone.entries()].map(([k, v]) => [k, v.length])) })}
     ${tiles}
     ${modelTable}
     ${progress}
@@ -272,6 +292,9 @@ function dashboardHtml(map, esc, focusTask) {
 }
 
 const DASH_CSS = `
+  .dzone { margin:4px 0 8px; } .dzone > summary { cursor:pointer; font-weight:600; padding:3px 0; }
+  .dplanning { color:#c2811f; animation: dpulse2 1.2s ease-in-out infinite; margin:2px 0 6px; }
+  @keyframes dpulse2 { 50% { opacity:.4; } }
   .dtask.live { border-color:#3794ff; animation: dpulse 1.4s ease-in-out infinite; }
   .dtask.live .dmark, .dpen { color:#3794ff; }
   @keyframes dpulse { 50% { box-shadow: 0 0 0 3px rgba(55,148,255,.25); } }
