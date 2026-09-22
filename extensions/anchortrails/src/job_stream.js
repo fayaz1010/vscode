@@ -78,16 +78,33 @@ async function streamJob({ client, repo, kind, response, token, pollMs = Number(
   let lines = 0;
   let started = false;
   let idle = 0;
+  let said = '';
+  let baselined = false;
   for (;;) {
     if (token && token.isCancellationRequested) return { lines, ended: 'cancelled' };
     let map;
     try { map = await client.map({ repo }); } catch { map = null; }
     if (map) {
+      // THE FIRST READ IS A BASELINE, NOT NEWS. run.json and ship.json still hold
+      // the PREVIOUS run when a new one starts, so diffing them against nothing
+      // replayed all of it: a fresh /run printed the last run's eight closes and
+      // its "run complete · $0.60" before this run had done anything. What was
+      // already on disk when we arrived is history; only what moves after is an
+      // event. The map's own stage still reports from the first read, because
+      // that is this job's work and nobody else's.
+      if (!baselined) {
+        baselined = true;
+        prev = { run: map.run, ship: map.ship };
+      }
       const events = diffEvents(prev, map, kind);
       for (const line of events) { response.markdown(`\n${line}`); lines += 1; }
+      // ONE LINE PER STATE, NOT PER POLL. progress() appends in the chat, so a
+      // four-second poll wrote "run…" (or the same task and phase) over and over
+      // -- the "series of run…" the user saw. Only a changed state speaks.
       if (typeof response.progress === 'function') {
         const pr = map.progress;
-        response.progress(kind === 'run' && pr && pr.task ? `${shortTask(pr.task)} · ${pr.phase || 'working'}` : `${kind}…`);
+        const now = kind === 'run' && pr && pr.task ? `${shortTask(pr.task)} · ${pr.phase || 'working'}` : `${kind}…`;
+        if (now !== said) { response.progress(now); said = now; }
       }
       const alive = jobAlive(map, kind);
       if (alive) { started = true; idle = 0; } else if (started || idle >= 2) {

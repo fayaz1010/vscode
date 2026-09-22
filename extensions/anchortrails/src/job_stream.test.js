@@ -25,6 +25,7 @@ describe('the chat keeps talking while a job runs', () => {
     const out = await streamJob({ client, repo: 'D:\\aozhen', kind: 'run', response, pollMs: 7, sleep: async (ms) => waits.push(ms) });
     assert.equal(out.ended, 'done');
     const text = response.parts.join('\n');
+    assert.equal(response.parts.filter((p) => p.startsWith('[')).length, new Set(response.parts.filter((p) => p.startsWith('['))).size, 'no progress line is written twice');
     assert.match(text, /lib-admin-payments\.ts · attempt 1 · asking the model · x-ai\/grok-4\.6/);
     assert.match(text, /acceptance: typecheck and re-map/);
     assert.match(text, /✓ lib-admin-payments\.ts — closed after 1 attempt · \$0\.0782/);
@@ -76,5 +77,40 @@ describe('the chat keeps talking while a job runs', () => {
   it('diffEvents is quiet when nothing moved', () => {
     const m = { running: true, progress: { task: 't.x', attempt: 1, phase: 'p' }, run: { results: [] } };
     assert.deepEqual(diffEvents(m, m, 'run'), []);
+  });
+});
+
+describe('the stream reports this job, not the last one', () => {
+  it('results and a ship already on disk when the job starts are history, never replayed', async () => {
+    // Live: a fresh /run printed run 1's eight closes and "run complete · $0.60"
+    // before run 2 had done anything -- run.json still held the previous run.
+    const old = { task: 't.old', outcome: 'closed', attempts: 1, cost_usd: 0.5 };
+    const answers = [
+      { running: true, run: { status: 'complete', closed: 8, cost_usd: 0.6, results: [old] }, ship: { status: 'deploy failed' } },
+      { running: true, progress: { task: 't.new', attempt: 1, phase: 'asking the model' }, run: { status: 'running', results: [old] }, ship: { status: 'deploy failed' } },
+      { running: false, run: { status: 'complete', closed: 1, cost_usd: 0.07, results: [old, { task: 't.new', outcome: 'closed', attempts: 1, cost_usd: 0.07 }] }, ship: { status: 'shipped', deploy_url: 'https://x' } },
+    ];
+    let i = 0;
+    const client = { async map() { return answers[Math.min(i++, answers.length - 1)]; } };
+    const response = stream();
+    await streamJob({ client, repo: 'x', kind: 'run', response, sleep: async () => {} });
+    const text = response.parts.join('\n');
+    assert.ok(!text.includes('t.old') && !text.includes('old —'), 'the previous run is not replayed');
+    assert.ok(!/\$0\.6\b/.test(text), 'nor its totals');
+    assert.match(text, /✓ new — closed after 1 attempt · \$0\.07/);
+    assert.match(text, /run complete: 1 closed · \$0\.07/);
+    assert.match(text, /ship: shipped/, 'a ship that moves after we arrive is news');
+  });
+
+  it('a map still reports its own stage from the first read', async () => {
+    const answers = [
+      { mapping: true, overview: { meta: { stage: 'shell', stages_done: 1, stages_total: 6 } } },
+      { mapping: false, overview: { meta: { status: 'complete', findings_total: 4, findings_actionable: 2 } } },
+    ];
+    let i = 0;
+    const client = { async map() { return answers[Math.min(i++, answers.length - 1)]; } };
+    const response = stream();
+    await streamJob({ client, repo: 'x', kind: 'map', response, sleep: async () => {} });
+    assert.match(response.parts.join('\n'), /stage: shell \(1\/6\)/, 'the first stage is this job, not history');
   });
 });
