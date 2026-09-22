@@ -118,8 +118,8 @@ describe('Dashboard tab', () => {
     assert.equal(taskPath({ execution: { write_scope: ['a/b.js'] } }), 'a/b.js');
     assert.equal(taskPath({ title: 'a/c.js: implement the declared behaviour' }), 'a/c.js');
     assert.equal(taskPath({}), '');
-    assert.deepEqual(runTotals(MAP.run), { results: 2, closed: 1, failed: 1, skipped: 0, cost: 0.0165, costAll: null, models: [], seconds: 640, status: 'running', dry: false });
-    assert.deepEqual(runTotals(null), { results: 0, closed: 0, failed: 0, skipped: 0, cost: null, costAll: null, models: [], seconds: null, status: '', dry: false });
+    assert.deepEqual(runTotals(MAP.run), { results: 2, closed: 1, failed: 1, handedOff: 0, skipped: 0, cost: 0.0165, costAll: null, models: [], seconds: 640, status: 'running', dry: false });
+    assert.deepEqual(runTotals(null), { results: 0, closed: 0, failed: 0, handedOff: 0, skipped: 0, cost: null, costAll: null, models: [], seconds: null, status: '', dry: false });
     const rows = markerRows(MAP.overview);
     assert.deepEqual(rows.map((r) => [r.name, r.actionable, r.total, r.tier]), [
       ['bus_factor', 3, 3, 'C'], ['config_orphan', 1, 1, 'B'], ['stub_body', 0, 16, 'A'], ['todo_debt', 0, 1, ''],
@@ -331,5 +331,54 @@ describe('the tabs stop repeating each other', () => {
   it('the third tab says which plan it is', () => {
     const { TABS } = require('./at_shell');
     assert.equal(TABS.find((t) => t.id === 'plan').label, 'Chat plan');
+  });
+});
+
+describe('a task no model could finish', () => {
+  const { dashboardHtml, runTotals, handoffHtml } = require('./dashboard');
+  const { runMark } = require('./plan');
+  const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const ROW = {
+    task: 't.ops', outcome: 'failed_handoff', attempts: 3, cost_usd: 0.04,
+    why: 'acceptance 1/2',
+    handoff: { card: '/s/handoff/t.ops.md', text: '# t.ops\nFiles you may change\n  - src/ops.tsx',
+               models_tried: ['qwen/qwen3-coder', 'deepseek/deepseek-chat', 'z-ai/glm-4.6'],
+               sent_to: null },
+  };
+
+  it('reads as handed over, not as a dead end', () => {
+    assert.equal(runMark(ROW).mark, '→');
+    assert.equal(runMark(ROW).label, 'handed over with a brief');
+  });
+
+  it('still counts as unfinished', () => {
+    const t = runTotals({ results: [ROW, { task: 't.b', outcome: 'closed' }] });
+    assert.equal(t.failed, 1, 'briefed is not done');
+    assert.equal(t.closed, 1);
+    assert.equal(t.handedOff, 1);
+  });
+
+  it('shows the brief in place, and which models had a go', () => {
+    const html = handoffHtml(ROW, esc);
+    assert.match(html, /A brief is ready\./);
+    assert.match(html, /3 models tried it: qwen\/qwen3-coder, deepseek\/deepseek-chat, z-ai\/glm-4\.6\./);
+    assert.match(html, /<pre># t\.ops/, 'readable without opening a file');
+    assert.equal(handoffHtml({ outcome: 'failed' }, esc), '', 'an ordinary failure adds nothing');
+  });
+
+  it('says where it went, or why it could not', () => {
+    assert.match(handoffHtml({ ...ROW, handoff: { ...ROW.handoff, sent_to: 'cursor' } }, esc), /Sent to Cursor\./);
+    const bad = handoffHtml({ ...ROW, handoff: { ...ROW.handoff, send_error: 'no Cursor window' } }, esc);
+    assert.match(bad, /could not reach it: no Cursor window/);
+    assert.match(bad, /<pre>/, 'the brief survives a failed send');
+  });
+
+  it('the row is amber, not red -- the work moved, it did not stop', () => {
+    const map = { ok: true, overview: { meta: {}, zones: [] },
+      plan: { tasks: [{ id: 't.ops', title: 'src/ops.tsx: wire it', deliverables: [] }] },
+      run: { results: [ROW] } };
+    const html = dashboardHtml(map, esc);
+    assert.match(html, /class="dtask m-failed_handoff"/, 'its own class, not the red one');
+    assert.match(html, /A brief is ready\./);
   });
 });

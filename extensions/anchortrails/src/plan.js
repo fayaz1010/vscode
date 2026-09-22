@@ -180,6 +180,10 @@ const RUN_MARK = {
   closed_unreviewed: ['✓', 'closed, not reviewed'],
   already_closed: ['✓', 'already closed'],
   failed: ['✗', 'failed'],
+  // NOT THE SAME AS FAILED, AND THE MARK SAYS SO. Every model on the ladder
+  // missed, so the task left the ladder and went to an IDE with a brief. It is
+  // still unfinished -- the ship gate holds on it -- but it is somewhere.
+  failed_handoff: ['→', 'handed over with a brief'],
   skipped_dirty: ['⊘', 'skipped: uncommitted changes'],
   blocked: ['⊘', 'blocked'],
   would_run: ['·', 'would run'],
@@ -202,7 +206,7 @@ function runSummary(run) {
   if (!run || !Array.isArray(run.results) || run.dry_run) return '';
   const n = (o) => run.results.filter((r) => r.outcome === o).length;
   const closed = n('closed') + n('closed_unreviewed') + n('already_closed');
-  const failed = n('failed');
+  const failed = n('failed') + n('failed_handoff');
   const parts = [`run: ${closed} closed`];
   if (failed) parts.push(`${failed} failed`);
   if (run.cost_usd != null) parts.push(`$${Number(run.cost_usd).toFixed(2)}`);

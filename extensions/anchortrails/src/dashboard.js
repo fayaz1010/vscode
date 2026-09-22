@@ -60,13 +60,41 @@ function markerRows(overview) {
     .sort((a, b) => b.actionable - a.actionable || b.total - a.total || a.name.localeCompare(b.name));
 }
 
+// WHAT TO DO WITH A TASK NO MODEL COULD FINISH.
+//
+// It used to end as one red cross and a sentence from the last attempt. The
+// three models that tried it, what each one cost, and why each was rejected all
+// existed -- in a log nobody opens. So the next move was always to reconstruct
+// the task by hand and re-type it into Cursor.
+//
+// The brief is written whether or not an IDE is reachable, so it is shown here
+// in full: read it, copy it, paste it wherever you like. If this machine is set
+// up to send it, the row says where it went instead.
+function handoffHtml(r, escape) {
+  const h = r && r.handoff;
+  if (!h) return '';
+  const tried = (h.models_tried || []).filter(Boolean);
+  const lead = h.sent_to
+    ? `Sent to ${h.sent_to.charAt(0).toUpperCase()}${h.sent_to.slice(1)}.`
+    : 'A brief is ready.';
+  const who = tried.length
+    ? ` ${tried.length} model${tried.length === 1 ? '' : 's'} tried it: ${tried.join(', ')}.`
+    : '';
+  const err = h.send_error ? ` <span class="dwarn">could not reach it: ${escape(h.send_error)}</span>` : '';
+  const body = h.text
+    ? `<details class="dbrief"><summary>the brief</summary><pre>${escape(h.text)}</pre></details>`
+    : '';
+  return `<div class="dhandoff"><b>${escape(lead)}</b>${escape(who)}${err}${body}</div>`;
+}
+
 function runTotals(run) {
   const results = run && Array.isArray(run.results) ? run.results : [];
   const n = (...o) => results.filter((r) => o.includes(r.outcome)).length;
   return {
     results: results.length,
     closed: n('closed', 'closed_unreviewed', 'already_closed'),
-    failed: n('failed'),
+    failed: n('failed', 'failed_handoff'),
+    handedOff: n('failed_handoff'),
     skipped: n('skipped_dirty', 'blocked'),
     cost: run && run.cost_usd != null ? Number(run.cost_usd) : null,
     costAll: run && run.cost_all_runs_usd != null ? Number(run.cost_all_runs_usd) : null,
@@ -240,6 +268,7 @@ function dashboardHtml(map, esc, focusTask) {
       <div class="dhead"><span class="dmark">${escape(live ? '✎' : (st.mark || '·'))}</span> <b>${escape(String(t.id).replace(/^t\./, ''))}</b><span class="muted"> · ${escape(headline)}</span>${live ? `<span class="dpen"> · writing ${escape(path || '')}${map.progress.phase ? ` · ${escape(map.progress.phase)}` : ''}</span>` : ''}</div>
       ${ds}
       <div class="meta">${escape(said)}${actual && budget ? ` <span class="dbudget">(est. up to ${escape(budget)})</span>` : ''}</div>
+      ${handoffHtml(r, escape)}
     </div>`;
   });
   // UNDER THEIR NODES. Tasks grouped by the zone their file belongs to, so the plan
@@ -318,6 +347,14 @@ const DASH_CSS = `
   .dash .dtask.on { border-color: var(--vscode-focusBorder, #3794ff); }
   .dash .dtask.m-closed, .dash .dtask.m-closed_unreviewed, .dash .dtask.m-already_closed { border-left:3px solid #4fbf9a; }
   .dash .dtask.m-failed { border-left:3px solid #e2533f; }
+  .dash .dtask.m-failed_handoff { border-left:3px solid #c2811f; }
+  .dash .dhandoff { margin:4px 0 0 18px; font-size:11px; color:#9aa3b2; }
+  .dash .dhandoff .dwarn { color:#e2533f; }
+  .dash .dbrief { margin-top:3px; }
+  .dash .dbrief summary { cursor:pointer; color:#7aa2f7; }
+  .dash .dbrief pre { white-space:pre-wrap; max-height:260px; overflow:auto;
+    background:#12151c; border:1px solid #232733; border-radius:4px; padding:6px;
+    margin:4px 0 0; font-size:10.5px; }
   .dash .dtask.m-skipped_dirty, .dash .dtask.m-blocked { border-left:3px solid #888; }
   .dash .dbudget { opacity:.55; font-size:11px; }
   .dash .dmark { display:inline-block; min-width:1.2em; } .dash .ddel { margin:2px 0 0 1.4em; font-size:11.5px; }
@@ -325,4 +362,5 @@ const DASH_CSS = `
   .dash.building > h3::after { content:" · mapping…"; font-weight:400; opacity:.6; }
 `;
 
-module.exports = { dashboardHtml, DASH_CSS, markerRows, runTotals, parseDeliverable, taskPath, modelsHtml, tokens };
+module.exports = {
+  handoffHtml, dashboardHtml, DASH_CSS, markerRows, runTotals, parseDeliverable, taskPath, modelsHtml, tokens };
