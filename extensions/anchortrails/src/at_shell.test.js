@@ -127,9 +127,9 @@ describe('the graph loads like a stream', () => {
     assert.match(html, /cmd: 'graph', zone: zone \|\| ''/, 'asks the extension, never the bridge');
     assert.match(html, /ask\(''\);/, 'depth 1 for every zone as soon as the zones are drawn');
     assert.match(html, /drawFiles\(m\.data\)/);
-    assert.match(html, /clickZone\(g\)/, 'a click frames the zone, and framing it opens it');
-    assert.match(html, /if \(want === openZone\) return;/, 'the view decides what is open, so a click and a wheel agree');
-    assert.match(html, /vscode\.setState\(\{ \.\.\.saved, openZone \}\)/, 'survives the five-second repaint');
+    assert.match(html, /clickZone\(hit\);/, 'a click frames whatever was hit, and framing it opens it');
+    assert.match(html, /if \(zone === openZone && file === openFile\) return;/, 'the view decides what is open at both levels, so a click and a wheel agree');
+    assert.match(html, /vscode\.setState\(\{ \.\.\.saved, openZone, openFile \}\)/, 'both levels survive the five-second repaint');
     assert.match(html, /class="mload"/, 'a place to say how much has been read');
     assert.match(html, /symbols still being read/, 'partial answers are named as such');
   });
@@ -141,15 +141,15 @@ describe('the map is navigated by zoom', () => {
 
   it('zooming into a node steps inside it, and zooming out leaves it', () => {
     const h = html();
-    assert.match(h, /share\(zoneAt\[near\]\) > 0\.30/, 'far enough in on a node and the view enters it');
-    assert.match(h, /share\(zoneAt\[openZone\]\) < 0\.18/, 'and leaves when it no longer fills the view');
+    assert.match(h, /share\(onZone\) > ENTER_ZONE/, 'far enough in on a node and the view enters it');
+    assert.match(h, /share\(zoneAt\[zone\]\) < LEAVE_ZONE/, 'and leaves when it no longer fills the view');
     assert.match(h, /onView = \(\) => \{ rescale\(\); step\(\); \}/, 'every view change is judged, wheel or click');
   });
 
   it('a click frames the node -- it does not zoom twice and land somewhere else', () => {
     const h = html();
     assert.match(h, /clickZone = \(g\) => \{/);
-    assert.match(h, /vb = \{ x: z\.cx - w \/ 2, y: z\.cy - h \/ 2, w, h \};\n        apply\(\);/);
+    assert.match(h, /vb = \{ x: target\.cx - w \/ 2, y: target\.cy - h \/ 2, w, h \};\n        apply\(\);/);
     assert.ok(!/const w = W \/ 4; const h = H \/ 4;/.test(h), 'the old competing zoom-to-quarter is gone');
   });
 
@@ -169,5 +169,45 @@ describe('the map is navigated by zoom', () => {
     assert.match(h, /const R = z\.r;/, "the zone's own radius bounds its contents");
     assert.match(h, /layer\.setAttribute\('opacity', '0\.12'\)/, 'the scattered dots step back');
     assert.ok(!/fill: '#0f1218', 'fill-opacity': '0\.92'/.test(h), 'no opaque overlay circle any more');
+  });
+});
+
+describe('the drill goes all the way down, and the map can point', () => {
+  const { shellHtml } = require('./at_shell');
+  const html = () => shellHtml({ map: { ok: true, overview: { meta: {}, zones: [{ zone: 'lib', slug: 'lib', files: 3 }, { zone: 'lib/admin', slug: 'lib-admin', files: 2 }], zone_edges: [] } } }, 'map');
+
+  it('keeps going past the zone: a file opens when it fills the view', () => {
+    const h = html();
+    assert.match(h, /const ENTER_FILE = 0\.22; const LEAVE_FILE = 0\.12;/, 'files have their own threshold');
+    assert.match(h, /const onFile = focus\(Object\.values\(fileAt\)\);/, 'and are candidates once a zone is open');
+    assert.match(h, /if \(onFile && share\(onFile\) > ENTER_FILE\) file = onFile\.key;/);
+    assert.match(h, /openFile === f\.path/, 'the open file is drawn differently');
+    assert.match(h, /if \(isOpen\) g\.appendChild\(label\(sx, syy - rad - R \* 0\.012, sy\.label, 2\.6/, 'its symbols get names');
+  });
+
+  it('what the view is inside of, not what is nearest the centre', () => {
+    // The wheel zooms about the CURSOR, so the node being zoomed into sits
+    // off-centre; a centre test never fired and the drill stopped at level one.
+    const h = html();
+    assert.match(h, /if \(d > it\.r \+ vb\.w \* 0\.28\) return;/, 'a margin around the view, not a point');
+    assert.match(h, /const score = d - it\.r;/, 'prefer the thing we are most inside of');
+    assert.ok(!/const centred = /.test(h), 'the old centre test is gone');
+  });
+
+  it('hover says what a thing is, and offers it to the chat as context', () => {
+    const h = html();
+    assert.match(h, /svg\.addEventListener\('mousemove', \(e\) => describe\(e\.target\)\);/);
+    assert.match(h, /const rel = related\(s\.sym\.id\);/, 'a symbol carries what it calls');
+    assert.match(h, /use as context →/);
+    assert.match(h, /cmd: 'chat', id: 'In ' \+ hoverCtx \+ ', ', draft: true/, 'a draft, so the person says what to do with it');
+    const { graphSvg } = require('./map_graph');
+    assert.match(graphSvg({ meta: {}, zones: [{ zone: 'lib', slug: 'lib', files: 2 }], zone_edges: [] }, (v) => String(v ?? '')), /class="mhover"/);
+  });
+
+  it('a double click opens the code; a single click goes in a level', () => {
+    const h = html();
+    assert.match(h, /if \(e\.detail > 1 && \(sym \|\| file\)\)/);
+    assert.match(h, /cmd: 'open-code', id: path \+ '#'/);
+    assert.match(h, /clickZone\(hit\);/);
   });
 });

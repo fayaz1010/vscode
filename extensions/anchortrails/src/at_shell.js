@@ -287,13 +287,17 @@ function shellHtml(data, tab, err) {
         drag = null;
         if (wasDrag) return;
         const sym = e.target.closest && e.target.closest('[data-sym]');
-        if (sym) {
-          const f = sym.closest('[data-file]');
-          if (f) vscode.postMessage({ cmd: 'open-code', id: f.dataset.file + '#' + (sym.dataset.line || 1) });
+        const file = e.target.closest && e.target.closest('[data-file]');
+        const zone = e.target.closest && e.target.closest('[data-zone]');
+        const hit = sym || file || zone;
+        if (!hit) return;
+        // A double click opens the code; a single click goes in one level.
+        if (e.detail > 1 && (sym || file)) {
+          const path = (file && file.dataset.file) || (sym && sym.dataset.fileOf);
+          if (path) vscode.postMessage({ cmd: 'open-code', id: path + '#' + ((sym && sym.dataset.line) || 1) });
           return;
         }
-        const g = e.target.closest && e.target.closest('[data-zone]');
-        if (g) clickZone(g);
+        clickZone(hit);
       });
       svg.addEventListener('pointercancel', () => { endDrag(); drag = null; });
       svg.addEventListener('dblclick', (e) => { e.preventDefault(); const g = e.target.closest && e.target.closest('[data-zone]'); if (g) { box.classList.remove('full'); showZone(g.dataset.zone); } });
@@ -309,41 +313,50 @@ function shellHtml(data, tab, err) {
       });
       // THE LEVEL BELOW THE ZONES, AND HOW YOU GET THERE.
       //
-      // Zones are drawn by the server. The webview then asks the extension for
-      // every zone's files (they exist while the map is still being read; symbols
+      // Zones come from the server. The webview asks the extension for every
+      // zone's files (they exist while the map is still being read; symbols
       // arrive when graphify lands) and scatters them as dots inside each zone --
-      // density you can see at a glance, from the first second.
+      // density at a glance, from the first second.
       //
-      // ZOOM IS THE NAVIGATION. Wheel in far enough on a node and the view steps
-      // INSIDE it: that zone's files are laid out within its own circle, each with
-      // the symbols it contains and the edges among them. Zoom back out and it
-      // closes again. A click just frames the node, which crosses the same
-      // threshold -- so clicking and zooming cannot disagree. Hysteresis (enter at
-      // 30% of the view, leave below 18%) keeps it from flickering on the edge.
+      // ZOOM IS THE NAVIGATION, ALL THE WAY DOWN. Wheel in on a zone and the view
+      // goes inside it: its files, laid out within its own circle. Keep going on a
+      // file and that file opens: its symbols, named, with the calls between them.
+      // Zoom out and each level closes again. A click just frames a thing, which
+      // crosses the same threshold -- so clicking and zooming cannot disagree.
       //
-      // LABELS DO NOT ZOOM. Text lives in the same viewBox as the drawing, so it
-      // grew with everything else; every label now carries its own base size and
-      // is rescaled by the view's factor on each change, which holds it at a
-      // constant size on screen. Strokes use non-scaling-stroke for the same
-      // reason. The webview never reads the bridge itself.
+      // WHAT YOU ARE LOOKING AT is the smallest thing the view is inside of, not
+      // the thing nearest the centre: the wheel zooms about the CURSOR, so the
+      // node being zoomed into sits off-centre and a centre test never fired --
+      // which is why the map stopped after the first level.
+      //
+      // LABELS DO NOT ZOOM: each carries its base size and is rescaled by the view
+      // factor, holding it constant on screen. Strokes use non-scaling-stroke.
+      // The webview never reads the bridge itself.
       const NS = 'http://www.w3.org/2000/svg';
       const mk = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
       const layer = mk('g', { class: 'mfiles' }); svg.appendChild(layer);
       const openLayer = mk('g', { class: 'mopen' }); svg.appendChild(openLayer);
       const zoneAt = {};
-      svg.querySelectorAll('[data-zone]').forEach((g) => { const c = g.querySelector('circle'); if (c) zoneAt[g.dataset.zone] = { g, cx: +c.getAttribute('cx'), cy: +c.getAttribute('cy'), r: +c.getAttribute('r') }; });
+      svg.querySelectorAll('[data-zone]').forEach((g) => {
+        const c = g.querySelector('circle'); if (!c) return;
+        const t = g.querySelector('title');
+        zoneAt[g.dataset.zone] = { key: g.dataset.zone, g, cx: +c.getAttribute('cx'), cy: +c.getAttribute('cy'), r: +c.getAttribute('r'), about: t ? t.textContent : g.dataset.zone };
+      });
       const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; };
       const saved = (vscode.getState && vscode.getState()) || {};
       let openZone = saved.openZone || '';
+      let openFile = saved.openFile || '';
       let openData = null;
-      const save = () => { if (vscode.setState) vscode.setState({ ...saved, openZone }); };
+      let fileAt = {};
+      let symAt = {};
+      const save = () => { if (vscode.setState) vscode.setState({ ...saved, openZone, openFile }); };
       const note = box.querySelector('.mload');
+      const hover = box.querySelector('.mhover');
 
-      // Every label keeps its size on screen: base size in data-fs, times the view.
       const rescale = () => {
         const k = vb.w / W;
         svg.querySelectorAll('text[data-fs]').forEach((t) => {
-          t.setAttribute('font-size', Math.max(0.4, Number(t.dataset.fs || 9) * k).toFixed(2));
+          t.setAttribute('font-size', Math.max(0.35, Number(t.dataset.fs || 9) * k).toFixed(2));
         });
       };
       const label = (x, y, text, size, fill) => {
@@ -359,12 +372,12 @@ function shellHtml(data, tab, err) {
         Object.keys(zones).forEach((slug) => {
           const z = zoneAt[slug]; if (!z) return;
           const files = zones[slug] || []; const k = files.length;
+          z.fileCount = k;
           files.forEach((f, i) => {
             const a = 2 * Math.PI * (i / Math.max(1, k)) + hash(f.path) * 0.9;
             const rr = z.r * (0.25 + 0.55 * hash(f.path + '#'));
             const dot = mk('circle', { cx: (z.cx + Math.cos(a) * rr).toFixed(1), cy: (z.cy + Math.sin(a) * rr).toFixed(1), r: Math.min(1.6, 0.35 + Math.sqrt(f.symbols || 0) * 0.22).toFixed(2), fill: '#cfd6e4', 'fill-opacity': '0.55', 'data-file': f.path, 'pointer-events': 'none' });
             if (box.dataset.live && f.path === box.dataset.live) { dot.setAttribute('class', 'live'); dot.setAttribute('r', '2.4'); }
-            const t = mk('title', {}); t.textContent = f.path + ' · ' + (f.symbols || 0) + ' symbols'; dot.appendChild(t);
             layer.appendChild(dot); n += 1;
           });
         });
@@ -373,99 +386,173 @@ function shellHtml(data, tab, err) {
         if (note) note.textContent = data && data.ok === false ? '' : (n ? n + ' files' + (data && data.partial ? ' · symbols still being read' : '') : 'reading files…');
       };
 
-      // Inside the node, drawn within the node's own circle -- so zooming in is
-      // literally going in, not an overlay landing on top of the map.
-      const drawInside = (slug, data) => {
+      // Everything inside the open zone, drawn within the zone's own circle. The
+      // open file (if any) spreads its symbols wide and names them; the others
+      // keep theirs as dots, so one file can be read without losing the zone.
+      const paintInterior = () => {
         while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild);
         Object.values(zoneAt).forEach((z) => z.g.classList.remove('open'));
-        const z = zoneAt[slug];
-        if (!z || !data || !data.ok) return;
+        fileAt = {}; symAt = {};
+        const z = openZone && zoneAt[openZone];
+        if (!z || !openData || openData.zone !== openZone || !openData.ok) { layer.setAttribute('opacity', '1'); return; }
         z.g.classList.add('open');
         layer.setAttribute('opacity', '0.12');
-        const files = data.files || [];
+        const files = openData.files || [];
         const R = z.r;
-        const pos = {};
         const edges = mk('g', { class: 'medges' }); openLayer.appendChild(edges);
         const ring = files.length > 1 ? R * 0.58 : 0;
-        const fr = Math.max(R * 0.05, Math.min(R * 0.16, R * 0.9 / Math.max(3, files.length)));
+        const fr = Math.max(R * 0.05, Math.min(R * 0.15, R * 0.85 / Math.max(3, files.length)));
         files.forEach((f, i) => {
           const a = 2 * Math.PI * i / Math.max(1, files.length) - Math.PI / 2;
           const fx = z.cx + Math.cos(a) * ring; const fy = z.cy + Math.sin(a) * ring;
-          const g = mk('g', { class: 'mfile', 'data-file': f.path });
+          const isOpen = openFile === f.path;
           const live = box.dataset.live && f.path === box.dataset.live;
-          g.appendChild(mk('circle', { cx: fx.toFixed(1), cy: fy.toFixed(1), r: fr.toFixed(2), fill: live ? '#3794ff' : '#2b3345', stroke: '#9aa3b2', 'stroke-width': '0.4', 'vector-effect': 'non-scaling-stroke', class: live ? 'live' : '' }));
-          const ft = mk('title', {}); ft.textContent = f.path + ' · ' + ((f.symbols || []).length) + ' symbols'; g.appendChild(ft);
-          g.appendChild(label(fx, fy + fr + R * 0.05, String(f.path).split('/').pop(), 3.2));
-          pos[f.id] = { x: fx, y: fy };
+          const g = mk('g', { class: 'mfile' + (isOpen ? ' on' : ''), 'data-file': f.path });
+          g.appendChild(mk('circle', { cx: fx.toFixed(1), cy: fy.toFixed(1), r: fr.toFixed(2), fill: live ? '#3794ff' : (isOpen ? '#1b2a44' : '#2b3345'), stroke: isOpen ? '#3794ff' : '#9aa3b2', 'stroke-width': isOpen ? '1' : '0.4', 'vector-effect': 'non-scaling-stroke' }));
+          g.appendChild(label(fx, fy + fr + R * 0.055, String(f.path).split('/').pop(), isOpen ? 4 : 3));
+          fileAt[f.path] = { key: f.path, cx: fx, cy: fy, r: fr, f };
           const syms = f.symbols || [];
+          const sr = fr * (isOpen ? 3.4 : 2.1);
           syms.forEach((sy, j) => {
             const b = 2 * Math.PI * j / Math.max(1, syms.length) + hash(sy.id) * 0.6;
-            const sr = fr * 2.1; const sx = fx + Math.cos(b) * sr; const sy2 = fy + Math.sin(b) * sr;
-            pos[sy.id] = { x: sx, y: sy2 };
-            const d = mk('circle', { cx: sx.toFixed(1), cy: sy2.toFixed(1), r: Math.max(fr * 0.22, 0.25).toFixed(2), fill: '#7fd3b9', 'data-sym': sy.id, 'data-line': sy.line || '' });
-            const st = mk('title', {}); st.textContent = sy.label + ' · ' + f.path + (sy.line ? ':' + sy.line : ''); d.appendChild(st);
-            g.appendChild(d);
+            const sx = fx + Math.cos(b) * sr; const syy = fy + Math.sin(b) * sr;
+            const rad = Math.max(fr * (isOpen ? 0.34 : 0.2), 0.22);
+            symAt[sy.id] = { key: sy.id, cx: sx, cy: syy, r: rad, sym: sy, file: f };
+            g.appendChild(mk('circle', { cx: sx.toFixed(1), cy: syy.toFixed(1), r: rad.toFixed(2), fill: '#7fd3b9', 'data-sym': sy.id, 'data-line': sy.line || '', 'data-file-of': f.path }));
+            if (isOpen) g.appendChild(label(sx, syy - rad - R * 0.012, sy.label, 2.6, '#7fd3b9'));
           });
           openLayer.appendChild(g);
         });
-        (data.edges || []).forEach((e) => {
-          const a = pos[e.source]; const b = pos[e.target];
-          if (a && b) { edges.appendChild(mk('line', { x1: a.x.toFixed(1), y1: a.y.toFixed(1), x2: b.x.toFixed(1), y2: b.y.toFixed(1), stroke: e.relation === 'calls' ? '#7fd3b9' : '#4a5160', 'stroke-width': '0.5', 'stroke-opacity': '0.55', 'vector-effect': 'non-scaling-stroke' })); return; }
+        (openData.edges || []).forEach((e) => {
+          const a = symAt[e.source] || fileAt[e.source]; const b = symAt[e.target] || fileAt[e.target];
+          const touches = openFile && ((a && a.file && a.file.path === openFile) || (b && b.file && b.file.path === openFile));
+          if (a && b) {
+            edges.appendChild(mk('line', { x1: a.cx.toFixed(1), y1: a.cy.toFixed(1), x2: b.cx.toFixed(1), y2: b.cy.toFixed(1), stroke: e.relation === 'calls' ? '#7fd3b9' : '#4a5160', 'stroke-width': touches ? '1' : '0.5', 'stroke-opacity': touches ? '0.9' : '0.45', 'vector-effect': 'non-scaling-stroke' }));
+            return;
+          }
           const known = a || b; const other = zoneAt[a ? e.zone_b : e.zone_a];
           if (known && other) {
-            const dx = other.cx - known.x; const dy = other.cy - known.y; const L = Math.hypot(dx, dy) || 1;
-            edges.appendChild(mk('line', { x1: known.x.toFixed(1), y1: known.y.toFixed(1), x2: (known.x + dx / L * R * 0.45).toFixed(1), y2: (known.y + dy / L * R * 0.45).toFixed(1), stroke: '#c2811f', 'stroke-width': '0.5', 'stroke-dasharray': '2 2', 'vector-effect': 'non-scaling-stroke' }));
+            const dx = other.cx - known.cx; const dy = other.cy - known.cy; const L = Math.hypot(dx, dy) || 1;
+            edges.appendChild(mk('line', { x1: known.cx.toFixed(1), y1: known.cy.toFixed(1), x2: (known.cx + dx / L * R * 0.45).toFixed(1), y2: (known.cy + dy / L * R * 0.45).toFixed(1), stroke: '#c2811f', 'stroke-width': '0.5', 'stroke-dasharray': '2 2', 'vector-effect': 'non-scaling-stroke' }));
           }
         });
         const nSym = files.reduce((n, f) => n + (f.symbols || []).length, 0);
         if (caption) {
-          caption.textContent = slug + ' · ' + files.length + ' files · ' + nSym + ' symbols · ' + ((data.edges || []).length) + ' edges' + (data.partial ? ' · still being read' : '');
+          caption.textContent = openZone + (openFile ? ' › ' + String(openFile).split('/').pop() : '') + ' · ' + files.length + ' files · ' + nSym + ' symbols' + (openData.partial ? ' · still being read' : '');
           const a = document.createElement('a'); a.href = '#'; a.textContent = 'findings ↓';
-          a.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); box.classList.remove('full'); showZone(slug); };
+          a.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); box.classList.remove('full'); showZone(openZone); };
           caption.appendChild(a);
         }
         rescale();
       };
 
-      const closeInside = () => {
-        layer.setAttribute('opacity', '1');
-        while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild);
-        Object.values(zoneAt).forEach((z) => z.g.classList.remove('open'));
-        openData = null;
-        if (caption) caption.textContent = '';
-      };
-
       const ask = (zone) => vscode.postMessage({ cmd: 'graph', zone: zone || '' });
 
-      // How much of the view a zone fills, and whether the view is on it.
-      const share = (z) => (2 * z.r) / Math.max(vb.w, 1e-6);
-      const centred = (z) => Math.hypot(z.cx - (vb.x + vb.w / 2), z.cy - (vb.y + vb.h / 2)) < z.r * 1.3;
-      const nearest = () => {
+      // WHAT THE VIEW IS INSIDE OF. Not "nearest the centre" -- the wheel zooms at
+      // the cursor, so the thing being zoomed into is off-centre and a centre test
+      // never fires. Prefer the one the view is most inside of, allowing a margin.
+      const share = (it) => (2 * it.r) / Math.max(vb.w, 1e-6);
+      const focus = (items) => {
         const cx = vb.x + vb.w / 2; const cy = vb.y + vb.h / 2;
-        let best = ''; let bestD = Infinity;
-        Object.keys(zoneAt).forEach((slug) => {
-          const d = Math.hypot(zoneAt[slug].cx - cx, zoneAt[slug].cy - cy);
-          if (d < bestD) { bestD = d; best = slug; }
+        let best = null; let bestScore = Infinity;
+        items.forEach((it) => {
+          const d = Math.hypot(it.cx - cx, it.cy - cy);
+          if (d > it.r + vb.w * 0.28) return;
+          const score = d - it.r;
+          if (score < bestScore) { bestScore = score; best = it; }
         });
         return best;
       };
+      const ENTER_ZONE = 0.30; const LEAVE_ZONE = 0.18;
+      const ENTER_FILE = 0.22; const LEAVE_FILE = 0.12;
       const step = () => {
-        const near = nearest();
-        let want = openZone;
-        if (near && centred(zoneAt[near]) && share(zoneAt[near]) > 0.30) want = near;
-        else if (openZone && (!zoneAt[openZone] || share(zoneAt[openZone]) < 0.18)) want = '';
-        if (want === openZone) return;
-        openZone = want; save();
-        if (!want) { closeInside(); return; }
-        if (openData && openData.zone === want) drawInside(want, openData); else ask(want);
+        let zone = openZone; let file = openFile;
+        const onZone = focus(Object.values(zoneAt));
+        if (onZone && share(onZone) > ENTER_ZONE) { if (onZone.key !== zone) { zone = onZone.key; file = ''; } }
+        else if (zone && (!zoneAt[zone] || share(zoneAt[zone]) < LEAVE_ZONE)) { zone = ''; file = ''; }
+        if (zone && zone === openZone) {
+          const onFile = focus(Object.values(fileAt));
+          if (onFile && share(onFile) > ENTER_FILE) file = onFile.key;
+          else if (file && (!fileAt[file] || share(fileAt[file]) < LEAVE_FILE)) file = '';
+        }
+        if (zone === openZone && file === openFile) return;
+        const zoneChanged = zone !== openZone;
+        openZone = zone; openFile = file; save();
+        if (zoneChanged && zone && !(openData && openData.zone === zone)) { ask(zone); return; }
+        paintInterior();
       };
       onView = () => { rescale(); step(); };
 
-      // A click frames the node; framing it crosses the threshold, which opens it.
+      // Hover tells you what a thing IS, and offers it to the chat as context --
+      // a path, a line and what it connects to is exactly what an edit needs to
+      // be aimed, so the map is a way of pointing as well as of looking.
+      const esc = (t) => String(t == null ? '' : t);
+      const related = (id) => {
+        const out = [];
+        (openData && openData.edges || []).forEach((e) => {
+          if (e.source === id && e.label_b) out.push(e.relation + ' → ' + e.label_b);
+          else if (e.target === id && e.label_a) out.push(e.label_a + ' → ' + e.relation);
+        });
+        return [...new Set(out)].slice(0, 4);
+      };
+      let hoverCtx = '';
+      const showHover = (html, ctx) => {
+        if (!hover) return;
+        hoverCtx = ctx || '';
+        hover.innerHTML = html + (ctx ? ' <a href="#" data-ctx="1">use as context →</a>' : '');
+        hover.classList.toggle('on', Boolean(html));
+      };
+      const describe = (el) => {
+        if (!el) { showHover('', ''); return; }
+        const symEl = el.closest('[data-sym]');
+        if (symEl) {
+          const s = symAt[symEl.dataset.sym];
+          if (s) {
+            const where = s.file.path + (s.sym.line ? ':' + s.sym.line : '');
+            const rel = related(s.sym.id);
+            showHover('<b>' + esc(s.sym.label) + '</b> <span class="muted">' + esc(where) + '</span>'
+              + (rel.length ? ' <span class="muted">· ' + esc(rel.join(' · ')) + '</span>' : ''),
+              where + ' — the symbol ' + s.sym.label + (rel.length ? ' (' + rel.join('; ') + ')' : ''));
+            return;
+          }
+        }
+        const fileEl = el.closest('[data-file]') || el.closest('[data-file-of]');
+        if (fileEl) {
+          const path = fileEl.dataset.file || fileEl.dataset.fileOf;
+          const f = fileAt[path];
+          const n = f ? (f.f.symbols || []).length : 0;
+          showHover('<b>' + esc(String(path).split('/').pop()) + '</b> <span class="muted">' + esc(path) + (n ? ' · ' + n + ' symbols' : '') + '</span>',
+            path + (n ? ' (' + n + ' symbols)' : ''));
+          return;
+        }
+        const zoneEl = el.closest('[data-zone]');
+        if (zoneEl && zoneAt[zoneEl.dataset.zone]) {
+          const z = zoneAt[zoneEl.dataset.zone];
+          showHover('<b>' + esc(z.key) + '</b> <span class="muted">' + esc(z.about) + '</span>', 'the zone ' + z.key);
+          return;
+        }
+        showHover('', '');
+      };
+      svg.addEventListener('mousemove', (e) => describe(e.target));
+      svg.addEventListener('mouseleave', () => showHover('', ''));
+      if (hover) {
+        hover.addEventListener('click', (e) => {
+          const a = e.target.closest('[data-ctx]');
+          if (!a || !hoverCtx) return;
+          e.preventDefault();
+          // A draft, not a send: the person says what they want done with it.
+          vscode.postMessage({ cmd: 'chat', id: 'In ' + hoverCtx + ', ', draft: true });
+        });
+      }
+
+      // A click frames a thing; framing it crosses the threshold, which opens it.
       clickZone = (g) => {
-        const z = zoneAt[g.dataset.zone]; if (!z) return;
-        const w = Math.max(z.r * 4.2, W / 24); const h = w * (H / W);
-        vb = { x: z.cx - w / 2, y: z.cy - h / 2, w, h };
+        const sym = g.dataset && g.dataset.sym;
+        const path = g.dataset && (g.dataset.file || g.dataset.fileOf);
+        const target = (sym && symAt[sym]) || (path && fileAt[path]) || zoneAt[g.dataset.zone];
+        if (!target) return;
+        const w = Math.max(target.r * 4.2, W / 60); const h = w * (H / W);
+        vb = { x: target.cx - w / 2, y: target.cy - h / 2, w, h };
         apply();
       };
 
@@ -473,10 +560,11 @@ function shellHtml(data, tab, err) {
         const m = ev.data || {}; if (m.cmd !== 'graph') return;
         if (!m.zone) { drawFiles(m.data); if (openZone) ask(openZone); return; }
         openData = { zone: m.zone, ...(m.data || {}) };
-        if (m.zone === openZone) drawInside(m.zone, m.data);
+        if (m.zone === openZone) { paintInterior(); step(); }
       });
-      box.querySelectorAll('[data-graph="reset"]').forEach((b) => b.addEventListener('click', () => { openZone = ''; save(); closeInside(); }));
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openZone) { openZone = ''; save(); closeInside(); reset(); } });
+      const leaveAll = () => { openZone = ''; openFile = ''; save(); paintInterior(); if (caption) caption.textContent = ''; };
+      box.querySelectorAll('[data-graph="reset"]').forEach((b) => b.addEventListener('click', leaveAll));
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (openZone || openFile)) { leaveAll(); reset(); } });
       rescale();
       ask('');
     });

@@ -153,7 +153,9 @@ function graphSvg(overview, esc, opts = {}) {
   // view, and the caption that names the node the view is zoomed on. Wheel zooms,
   // drag pans, a click zooms to the node -- all on the viewBox, no library.
   const tools = '<div class="mtools"><button type="button" data-graph="full" title="Full screen (Esc closes)">⤢ Full screen</button><button type="button" data-graph="reset" title="Fit the whole map">⟲ Fit</button><span class="mcaption"></span><span class="mload"></span></div>';
-  return `<div class="mgraph" data-w="${W}" data-h="${H}"${live ? ` data-live="${escape(live)}"` : ''}>${tools}<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
+  // What the pointer is over, and a way to hand it to the chat as context.
+  const hover = '<div class="mhover"></div>';
+  return `<div class="mgraph" data-w="${W}" data-h="${H}"${live ? ` data-live="${escape(live)}"` : ''}>${tools}${hover}<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
 }
 
 const GRAPH_CSS = `
@@ -176,6 +178,13 @@ const GRAPH_CSS = `
   .mgraph .mnode { cursor:pointer; } .mgraph .mnode:hover circle { stroke:#fff; stroke-width:1.4; }
   /* the zone you are inside: its circle steps back so its contents read */
   .mgraph .mnode.open > circle { fill-opacity:.18; stroke:#3794ff; stroke-width:1.4; }
+  .mgraph .mfile.on > circle { filter:drop-shadow(0 0 2px #3794ff); }
+  .mgraph .mhover { display:none; position:absolute; left:6px; right:6px; bottom:6px; z-index:2;
+    background:#161b26; border:1px solid #2b3345; border-radius:5px; padding:4px 7px; font-size:10.5px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:auto; }
+  .mgraph .mhover.on { display:block; }
+  .mgraph .mhover a { color:#7fd3b9; margin-left:8px; }
+  .mgraph.full .mhover { font-size:12px; }
   .mgraph .mnode.open > text { fill:#3794ff; }
   .mgraph .mfile circle { cursor:pointer; }
   .mgraph .mnode.live > circle { stroke:#3794ff; stroke-width:1.8; animation: mpulse 1.4s ease-in-out infinite; }
