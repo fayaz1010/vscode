@@ -270,3 +270,49 @@ describe('what is happening now, and what the last ship did', () => {
     assert.match(mapActions({ can_ship: true, shipping: true }, esc), /Shipping…/);
   });
 });
+
+describe('what to do next', () => {
+  const { nextStep, nextStepHtml } = require('./plan');
+  const ready = { ok: true, currency: { state: 'current' }, objective: 'make the admin screens reachable' };
+
+  it('leads with the one action this moment wants, named for what happens', () => {
+    assert.equal(nextStep({ ok: false }).cmd, '/map');
+    assert.match(nextStep({ ok: false }).label, /Read this project/);
+    assert.equal(nextStep({ ok: true, currency: { state: 'stale' } }).cmd, '/map');
+    const noObjective = nextStep({ ok: true, currency: { state: 'current' } });
+    assert.equal(noObjective.cmd, '/map plan ');
+    assert.equal(noObjective.draft, true, 'the sentence is the person\'s to finish');
+    assert.equal(nextStep(ready).cmd, '/map plan', 'an objective but no plan: make one');
+    const build = nextStep({ ...ready, plan: { tasks: [{ id: 't.a' }, { id: 't.b' }] } });
+    assert.equal(build.cmd, '/run');
+    assert.equal(build.label, 'Build it', 'not "/run" -- what happens, not the command');
+    assert.match(build.why, /2 tasks/);
+    assert.match(build.why, /puts back anything that breaks the build/, 'says what protects them');
+  });
+
+  it('while it works, it says so and offers to follow along', () => {
+    assert.equal(nextStep({ mapping: true }).busy, true);
+    assert.equal(nextStep({ planning: true }).busy, true);
+    assert.equal(nextStep({ running: true }).cmd, '/run status');
+    assert.equal(nextStep({ shipping: true }).cmd, '/run status');
+  });
+
+  it('after the run it follows the verdict, and a held ship says why', () => {
+    const plan = { tasks: [{ id: 't.a' }] };
+    const shipIt = nextStep({ ...ready, plan, assessment: { verdict: 'ready' } });
+    assert.equal(shipIt.cmd, '/ship');
+    assert.match(shipIt.why, /judged ready/);
+    const held = nextStep({ ...ready, plan, ship: { status: 'held', summary: '1 task(s) did not finish (ops-center) — holding.' } });
+    assert.equal(held.cmd, '/ship');
+    assert.match(held.why, /ops-center/, "the person is told what is unfinished before they override it");
+    const again = nextStep({ ...ready, plan, assessment: { verdict: 'more_work' } });
+    assert.equal(again.cmd, '/run', 'not ready means there is more to build');
+  });
+
+  it('renders as a button and a sentence, and a busy step is not clickable', () => {
+    const html = nextStepHtml({ ...ready, plan: { tasks: [{ id: 't.a' }] } }, (v) => String(v ?? ''));
+    assert.match(html, /<button data-cmd="chat" data-id="\/run" class="mnextbtn">Build it<\/button>/);
+    assert.match(html, /class="mnextwhy">It writes the code for 1 task/);
+    assert.match(nextStepHtml({ mapping: true }, (v) => String(v ?? '')), /<span class="mnextbtn busy">Reading the code…<\/span>/);
+  });
+});

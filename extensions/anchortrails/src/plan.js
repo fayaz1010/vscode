@@ -211,6 +211,63 @@ function runSummary(run) {
 
 // THE BUTTONS. Each puts a sentence into @at and sends it; the chat does the work.
 // Shared by the Map and Dashboard tabs so both offer the same three moves.
+// WHAT TO DO NEXT, IN ONE BUTTON AND ONE SENTENCE.
+//
+// The panel offered four buttons of equal weight and no hint which one this
+// moment wanted -- fine if you already know the loop, useless if you do not,
+// and the people this is for do not. So one action leads, named for what
+// HAPPENS rather than for the command it sends, with a line saying what it will
+// do. The others stay available underneath for anyone who wants them.
+//
+// It is derived, never stored: the same map the rest of the panel draws from
+// decides what comes next, so the button cannot disagree with the picture.
+function nextStep(map) {
+  const m = map || {};
+  const cur = m.currency || {};
+  const plan = m.plan && Array.isArray(m.plan.tasks) ? m.plan.tasks : null;
+  const verdict = (m.assessment || {}).verdict;
+  const ship = m.ship || {};
+
+  if (m.mapping) return { busy: true, label: 'Reading the code…', why: 'It is looking at every file to see what is there.' };
+  if (m.planning) return { busy: true, label: 'Working out the plan…', why: 'Turning what you asked for into tasks it can do one at a time.' };
+  if (m.running) return { label: 'See how it is going', cmd: '/run status', why: 'It is writing code now. This follows along and tells you what happened.' };
+  if (m.shipping) return { label: 'See how it is going', cmd: '/run status', why: 'It is putting the finished work online.' };
+
+  if (!m.ok || cur.state === 'none') {
+    return { label: 'Read this project', cmd: '/map', why: 'Nothing can be planned until it has looked at the code. This takes a few seconds.' };
+  }
+  if (cur.state === 'stale') {
+    return { label: 'Read the new changes', cmd: '/map', why: 'The code has moved since it last looked, so the plan would be about the old version.' };
+  }
+  if (!m.objective) {
+    return { label: 'Say what you want built', cmd: '/map plan ', draft: true,
+             why: 'Finish the sentence in the chat box — one line, the way you would ask a person. It turns that into a plan.' };
+  }
+  if (!plan || !plan.length) {
+    return { label: 'Make the plan', cmd: '/map plan', why: 'It works out the tasks for what you asked, and shows them here before anything is written.' };
+  }
+  if (verdict === 'ready' && ship.status !== 'shipped') {
+    return { label: 'Put it online', cmd: '/ship', why: 'The work is judged ready. This commits it, pushes it and builds a preview you can open.' };
+  }
+  if (ship.status === 'held') {
+    return { label: 'Ship what is finished', cmd: '/ship',
+             why: (ship.summary || 'Some tasks did not finish, so it held off.') + ' This ships the ones that did.' };
+  }
+  const n = plan.length;
+  return { label: 'Build it', cmd: '/run',
+           why: `It writes the code for ${n} task${n === 1 ? '' : 's'}, checks each one, and puts back anything that breaks the build.` };
+}
+
+function nextStepHtml(map, esc) {
+  const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  const step = nextStep(map);
+  if (!step) return '';
+  const button = step.busy
+    ? `<span class="mnextbtn busy">${escape(step.label)}</span>`
+    : `<button data-cmd="chat" data-id="${escape(step.cmd)}"${step.draft ? ' data-draft="1"' : ''} class="mnextbtn">${escape(step.label)}</button>`;
+  return `<div class="mnext">${button}<span class="mnextwhy">${escape(step.why)}</span></div>`;
+}
+
 function mapActions(map, esc) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
   const running = Boolean(map && map.running);
@@ -425,10 +482,20 @@ function mapHtml(map, esc) {
   const body = zones.length || cleanRows || greyBlock
     ? graph + zones.map(zoneBlock).join('') + cleanRows + greyBlock
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${shipLine(map, escape)}${progressHtml(map, escape)}${actions}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${nextStepHtml(map, escape)}${shipLine(map, escape)}${progressHtml(map, escape)}${actions}${body}</section>`;
 }
 
 const MAP_CSS = `
+  .mnext { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin:2px 0 10px;
+    padding:9px 11px; border:1px solid #2b3345; border-left:3px solid #3794ff; border-radius:6px;
+    background:var(--vscode-editor-background,#1e1e1e); }
+  .mnextbtn { background:#0e639c; color:#fff; border:0; border-radius:4px; padding:6px 13px;
+    cursor:pointer; font-size:12px; font-weight:600; white-space:nowrap; }
+  .mnextbtn:hover { background:#1177bb; }
+  .mnextbtn.busy { background:#2b3345; color:#cfd6e4; cursor:default;
+    animation: mnextpulse 1.4s ease-in-out infinite; }
+  @keyframes mnextpulse { 50% { opacity:.55; } }
+  .mnextwhy { opacity:.75; line-height:1.45; }
   .mpen { color:#3794ff; animation: mpen 1.2s ease-in-out infinite; }
   @keyframes mpen { 50% { opacity:.35; } }
   .map .mrow { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; padding:4px 0;
@@ -617,6 +684,8 @@ function startPlan(client, vscode) {
 
 module.exports = {
   liveFile,
+  nextStep,
+  nextStepHtml,
   runIndex,
   runMark,
   runSummary,

@@ -11,7 +11,7 @@
  *
  * Absent is a state: a folder with no map yet shows the buttons that make one.
  */
-const { runIndex, runMark, mapActions, shipLine, progressHtml, liveFile } = require('./plan');
+const { runIndex, runMark, mapActions, shipLine, progressHtml, liveFile, nextStepHtml } = require('./plan');
 const { graphSvg, zoneOfFile } = require('./map_graph');
 
 // "symbol (marker, line N)" -- the planner's deliverable line. The line is what makes
@@ -284,6 +284,7 @@ function dashboardHtml(map, esc, focusTask) {
     <p class="muted">${escape(String(meta.repo || where || '').split(/[\\/]/).slice(-2).join('/'))}</p>
     <div class="chips">${chips.join('')}</div>
     ${objectiveLine}
+    ${nextStepHtml(map, escape)}
     ${shipLine(map, escape)}
     ${progressHtml(map, escape)}
     ${actions}
