@@ -729,6 +729,66 @@ describe('the tool loop', () => {
     assert.match(response.parts.join(''), /Claude Desktop is open\.$/);
   });
 
+  function computerClient({ invoke }) {
+    return {
+      async prepare() {
+        return prepared({
+          task_class: 'computer',
+          tools_required: true,
+          turn: { goal: 'ask claude desktop what is 9x8', cursor: '1/3', playbook: 'computer', steps: '1.LOOK [>] | 2.ACT [ ] | 3.VERIFY [ ]' },
+        });
+      },
+      invoke,
+    };
+  }
+
+  it('a computer task whose real calls all succeeded is saved as an autoflow, once, with the steps that ran', async () => {
+    // "can we train Dest itself" -- the recipe that worked is what
+    // personal_autoflow_match hands back next time.
+    const { vscode } = toolHost({
+      onInvoke: (name) => ({ content: [{ value: name === 'personal_autoflow_match' ? '{"match_count":0,"matches":[]}' : '{"ide_id":"claude_desktop","text":"72"}' }] }),
+      replies: [
+        [{ callId: 'c0', name: 'personal_autoflow_match', input: { goal: 'ask claude' } },
+          { callId: 'c1', name: 'desktop_llm_prompt', input: { ide_id: 'claude_desktop', prompt: 'what is 9x8' } }],
+        [{ value: 'Claude said 72.' }],
+      ],
+    });
+    const saves = [];
+    const client = computerClient({ async invoke(name, args, opts) { saves.push({ name, args, opts }); return { ok: true, data: { saved: { id: 'af01' } } }; } });
+    const response = stream();
+    await handleTurn({ client, vscode, request: { prompt: 'ask claude desktop what is 9x8' }, context: { history: [] }, response });
+    assert.equal(saves.length, 1);
+    assert.equal(saves[0].name, 'personal_autoflow_record');
+    assert.equal(saves[0].args.goal, 'ask claude desktop what is 9x8');
+    assert.deepEqual(saves[0].args.steps, [{ tool: 'desktop_llm_prompt', args: { ide_id: 'claude_desktop', prompt: 'what is 9x8' } }], 'bookkeeping calls are not steps');
+    assert.equal(saves[0].opts.autoApprove, true, 'AT writing its own memory never needs a modal');
+    assert.match(response.parts.join(''), /\*learned: 1 step saved for "ask claude desktop what is 9x8" af01\*/);
+  });
+
+  it('nothing is learned from a turn with a failed, denied or non-zero call, and a save error never fails the turn', async () => {
+    const { callFailed, flowSteps } = require('./participant');
+    assert.equal(callFailed('{"error":"focus step: focus failed"}'), true);
+    assert.equal(callFailed('{"denied":true,"tool":"x"}'), true);
+    assert.equal(callFailed('{"exit_code":1,"stdout":""}'), true);
+    assert.equal(callFailed('{"exit_code":0,"stdout":"ok"}'), false);
+    assert.equal(callFailed('{"count":7}'), false);
+    assert.equal(callFailed('error: no such window'), true);
+    assert.equal(callFailed('7 matches'), false);
+    assert.equal(flowSteps([{ tool: 'desktop_go', args: {}, ok: true }, { tool: 'desktop_llm_prompt', args: {}, ok: false }]), null);
+    assert.equal(flowSteps([{ tool: 'personal_autoflow_match', args: {}, ok: true }]), null, 'no real steps');
+    assert.equal(flowSteps(Array.from({ length: 9 }, () => ({ tool: 'desktop_go', args: {}, ok: true }))), null, 'a wander, not a recipe');
+    const { vscode } = toolHost({
+      onInvoke: () => ({ content: [{ value: '{"error":"focus step: focus failed"}' }] }),
+      replies: [[{ callId: 'c1', name: 'desktop_llm_prompt', input: { prompt: 'x' } }], [{ value: 'It failed.' }]],
+    });
+    const saves = [];
+    const client = computerClient({ async invoke(name) { saves.push(name); throw new Error('db locked'); } });
+    const response = stream();
+    const result = await handleTurn({ client, vscode, request: { prompt: 'ask claude desktop something' }, context: { history: [] }, response });
+    assert.equal(saves.length, 0);
+    assert.equal(result.metadata.drive.done, true);
+  });
+
   it('a text-only reply never enters the loop', async () => {
     const { vscode, sends, invoked } = toolHost({
       onInvoke: () => ({ content: [] }),
@@ -832,15 +892,27 @@ describe('the tool loop', () => {
     assert.equal(invoked.length, 1);
   });
 
-  it('the approval modal is plain words, with the raw command underneath', () => {
-    // "approval dialog was full of syntax": v1 put the input JSON in the title.
-    const { approvalText, plainCommand } = require('./participant');
+  it('the approval modal is plain words -- no command syntax anywhere in it', () => {
+    // "approval dialog was full of syntax" (v1: input JSON in the title),
+    // then "approve dialog is same still, huge 4 line syntax style" (v2:
+    // `Command: <raw PowerShell>` underneath). v3: what it will do, in words.
+    const { approvalText, plainCommand, describeCommand } = require('./participant');
     const run = approvalText({ name: 'desktop_run_command', input: { command: 'powershell -NoProfile -Command "$a = Get-StartApps | Where-Object Name -eq Claude; Start-Process shell:AppsFolder\\$($a.AppID)"' } });
-    assert.equal(run.message, 'AnchorTrails wants to run a command on this computer');
-    assert.match(run.detail, /^Command: \$a = Get-StartApps \| Where-Object Name -eq Claude; Start-Process shell:AppsFolder/);
-    assert.ok(!run.detail.includes('powershell -NoProfile'), 'the wrapper is noise to a person');
-    assert.ok(!run.message.includes('{'), 'no JSON in the title');
+    assert.equal(run.message, 'AnchorTrails wants to look up startapps, then start an app');
+    assert.ok(!run.detail.includes('powershell') && !run.detail.includes('$'), 'no syntax underneath');
+    assert.ok(!run.message.includes('{') && !run.message.includes('|'), 'no syntax in the title');
     assert.equal(plainCommand({ command: 'where.exe claude' }), 'where.exe claude');
+    assert.equal(describeCommand('Stop-Process -Name claude -Force; Remove-Item C:\\tmp\\x.log'), 'stop the program claude, then delete x.log');
+    assert.equal(describeCommand('Invoke-WebRequest https://example.com/a.zip -OutFile a.zip'), 'download from https://example.com/a.zip');
+    assert.equal(describeCommand('Get-Process | Where-Object { $_.ProcessName -match claude } | Format-Table'), 'look up process');
+    assert.equal(describeCommand('Get-Process claude | Format-List'), 'look up claude');
+    assert.equal(describeCommand('where.exe claude'), 'look up claude');
+    assert.equal(describeCommand('git checkout -- foo.js'), 'run git checkout');
+    assert.equal(describeCommand('notepad'), 'run notepad');
+    assert.equal(describeCommand('a; b; c; d; e'), 'run a, then run b, then run c, and 2 more');
+    const kill = approvalText({ name: 'desktop_run_command', input: { command: 'Stop-Process -Name claude' }, goal: 'launch claude' });
+    assert.equal(kill.message, 'AnchorTrails wants to stop the program claude');
+    assert.equal(kill.detail, 'Asking because it uses "Stop-Process".');
     const click = approvalText({ name: 'desktop_look_click', input: { text: 'Claude Desktop (plain)' } });
     assert.equal(click.message, 'AnchorTrails wants to click "Claude Desktop (plain)"');
     const go = approvalText({ name: 'desktop_go', input: { i: 0, task: 'launch' } });
@@ -850,6 +922,9 @@ describe('the tool loop', () => {
     const nav = approvalText({ name: 'browser_navigate', input: { url: 'https://example.com/form' } });
     assert.equal(nav.message, 'AnchorTrails wants to act in the browser');
     assert.match(nav.detail, /example\.com\/form/);
+    const other = approvalText({ name: 'office_excel_write', input: { selector: { name: 'Sheet1' }, extra: { deep: [1, 2] } } });
+    assert.equal(other.detail, 'Target: Sheet1');
+    assert.ok(!other.detail.includes('{'), 'the generic fallback shows no JSON either');
   });
 
   it('auto-approves reads and launches the user asked for; asks for everything else', () => {
@@ -886,7 +961,7 @@ describe('the tool loop', () => {
     assert.equal(shellAskReason('Remove-Item x', goal), 'it uses "Remove-Item"');
     assert.equal(shellAskReason('notepad', goal), '"notepad" is not a read or a launch I recognise');
     assert.equal(shellAskReason('claude', goal), '', 'a bare program the user named counts as launching it');
-    assert.match(approvalText({ name: 'desktop_run_command', input: { command: 'Remove-Item x' }, goal }).detail, /Asking because it uses "Remove-Item"\.$/);
+    assert.equal(approvalText({ name: 'desktop_run_command', input: { command: 'Remove-Item x' }, goal }).detail, 'Asking because it uses "Remove-Item".');
     assert.equal(autoApprove({ name: 'desktop_run_command', input: { command: launch } }, goal), true);
     assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'claude' } }, goal), true, 'the program the user named; it may hang, it cannot hurt');
     assert.equal(autoApprove({ name: 'runInTerminal', input: { command: 'notepad' } }, goal), false, 'a program the user did not name');

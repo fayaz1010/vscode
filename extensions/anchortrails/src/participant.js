@@ -365,20 +365,92 @@ function plainCommand(input) {
   return (m ? m[1] : raw).replace(/\\"/g, '"').replace(/\s+/g, ' ').trim();
 }
 
+// One short phrase per command segment, in words a person reads at a
+// glance: "stop the program claude", "delete x", "download from ...".
+// The raw command never goes in the modal any more -- "approve dialog is
+// same still, huge 4 line syntax style" was the reaction to `Command: ...`
+// underneath the plain title.
+const VERB_PHRASES = [
+  [/^(stop-process|taskkill|kill|pkill)$/, 'stop the program'],
+  [/^(remove-item|rm|rmdir|del|erase)$/, 'delete'],
+  [/^(new-item|mkdir|md)$/, 'create'],
+  [/^(set-content|add-content|out-file|tee)$/, 'write the file'],
+  [/^(copy-item|cp|copy|xcopy|robocopy)$/, 'copy'],
+  [/^(move-item|rename-item|mv|move|ren)$/, 'move or rename'],
+  [/^(invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget)$/, 'download from'],
+  [/^(start-process|start|open|xdg-open|invoke-item)$/, 'start'],
+  [/^(git)$/, 'run git'],
+  [/^(npm|npx|pip|pip3|winget|choco|msiexec|apt|brew)$/, 'install or run a package with'],
+  [/^(set-\w+)$/, 'change a setting with'],
+  [/^(get-\w+|dir|ls|type|cat|where(?:\.exe)?|findstr|grep|tasklist|select-string)$/, 'read'],
+];
+
+// Pipe stages that only shape output: "Get-Process | Where-Object ... |
+// Format-Table" is one action, "look up process", not three.
+const FILTER_VERBS = /^(where-object|where|\?|select-object|select|sort-object|sort|format-\w+|out-string|out-null|foreach-object|foreach|%|measure-object|group-object|convertto-json|convertfrom-json|select-string|findstr|grep|head|tail|more|tee-object)$/;
+
+function firstArgument(segment, verb) {
+  const rest = segment.replace(/^[({]+\s*/, '').replace(/^\$[\w:]+\s*=\s*/, '').replace(/^&\s*/, '');
+  const tokens = rest.split(/\s+/).slice(1).filter((t) => t && !/^-/.test(t));
+  let arg = (tokens[0] || '').replace(/^["']|["']$/g, '');
+  if (!/:\/\//.test(arg)) arg = arg.replace(/^.*[\\/]/, '');
+  if (!arg || arg === verb || /^[$@({]/.test(arg)) return '';
+  return clip(arg, 40);
+}
+
+function describeStage(stage) {
+  const verb = verbOf(stage);
+  if (!verb || CONTROL_VERBS.has(verb) || FILTER_VERBS.test(verb) || /^[-$@'"(]/.test(verb)) return '';
+  const arg = firstArgument(stage, verb);
+  if (LAUNCH_INSIDE.test(stage) && !/^(start-process|start|open|invoke-item)$/.test(verb)) {
+    return `start ${arg || 'an app'}`;
+  }
+  for (const [re, phrase] of VERB_PHRASES) {
+    if (!re.test(verb)) continue;
+    if (phrase === 'start') return `start ${arg || 'an app'}`;
+    if (phrase === 'read') return `look up ${arg || verb.replace(/^get-/, '').replace(/\.exe$/, '')}`;
+    return arg ? `${phrase} ${arg}` : phrase;
+  }
+  return arg ? `run ${verb} ${arg}` : `run ${verb}`;
+}
+
+// A statement is one action; its pipe stages after the first only filter.
+function describeStatement(statement) {
+  const stages = String(statement || '').split(/\s*\|\s*/).map((x) => x.trim()).filter(Boolean);
+  for (const stage of stages) {
+    const p = describeStage(stage);
+    if (p) return p;
+  }
+  return '';
+}
+
+function describeCommand(command) {
+  const plain = plainCommand({ command });
+  const phrases = [];
+  for (const st of String(plain || '').split(/\s*(?:;|&&|\|\||\r?\n)\s*/)) {
+    const p = describeStatement(st);
+    if (p && !phrases.includes(p)) phrases.push(p);
+  }
+  if (!phrases.length) return 'run a command';
+  const shown = phrases.slice(0, 3);
+  const more = phrases.length - shown.length;
+  return shown.join(', then ') + (more > 0 ? `, and ${more} more` : '');
+}
+
 function approvalText(rawCall) {
   const call = innerCall(rawCall);
   const input = call.input || {};
   const name = String(call.name || '');
   if (/llm_prompt|ide_relay|ide_send_prompt/.test(name)) {
-    return { message: `AnchorTrails wants to send a message to ${input.ide_id || 'another app'}`, detail: `Message: ${clip(String(input.prompt || input.message || ''), 300)}` };
+    return { message: `AnchorTrails wants to send a message to ${input.ide_id || 'another app'}`, detail: `Message: ${clip(String(input.prompt || input.message || ''), 160)}` };
   }
   const target = input.text || input.label || input.name
     || (input.selector && input.selector.name) || (input.i != null ? `item ${input.i}` : '');
   if (name === 'desktop_run_command' || name === 'runInTerminal') {
     const why = shellAskReason(input.command, call.goal);
     return {
-      message: 'AnchorTrails wants to run a command on this computer',
-      detail: `Command: ${clip(plainCommand(input), 300)}${why ? `\n\nAsking because ${why}.` : ''}`,
+      message: `AnchorTrails wants to ${describeCommand(input.command)}`,
+      detail: why ? `Asking because ${why}.` : '',
     };
   }
   if (/click|go$|invoke|press|tap/.test(name)) {
@@ -390,9 +462,8 @@ function approvalText(rawCall) {
   if (/^browser_/.test(name)) {
     return { message: 'AnchorTrails wants to act in the browser', detail: `Tool: ${name}${input.url ? ` — ${clip(input.url, 120)}` : ''}` };
   }
-  let args = '';
-  try { args = JSON.stringify(input); } catch { args = ''; }
-  return { message: `AnchorTrails wants to run ${name}`, detail: clip(args, 300) };
+  // No JSON here either: the tool's name and, when it has one, its target.
+  return { message: `AnchorTrails wants to run ${name}`, detail: target ? `Target: ${clip(target, 60)}` : `Tool: ${name}` };
 }
 
 // Skip the modal for what cannot hurt and is plainly part of the ask:
@@ -634,6 +705,7 @@ async function runModelRound({
   const messages = [...(turn.messages || [])];
   let wroteAny = false;
   let toolRounds = 0;
+  const ledger = [];
   // One progress line for the whole round. A progress() per call made the
   // chat collapse each ledger line into its own "Finished with 1 step" group.
   if (response && typeof response.progress === 'function') {
@@ -663,6 +735,7 @@ async function runModelRound({
       const text = await invokeTool(vscode, request, call, token, approvals);
       response.markdown(ledgerLine(call, text));
       wroteAny = true;
+      ledger.push({ tool: call.name, args: call.input || {}, ok: !callFailed(text) });
       resultParts.push(mkResult(vscode, call.callId, text));
     }
     messages.push({ role: 'assistant', content: assistantParts });
@@ -671,7 +744,63 @@ async function runModelRound({
   if (!wroteAny) {
     response.markdown(await completeVisible(client, turn, prompt));
   }
-  return { ok: true, toolRounds };
+  return { ok: true, toolRounds, ledger };
+}
+
+// A result the model would read as failure: the bridge's error shape, a
+// denied approval, a non-zero shell exit, or a bare error string.
+function callFailed(text) {
+  const s = String(text || '').trim();
+  if (!s) return true;
+  try {
+    const obj = JSON.parse(s);
+    if (obj && typeof obj === 'object') {
+      if (obj.denied || obj.error || obj.ok === false || obj.refused) return true;
+      if (obj.exit_code != null && Number(obj.exit_code) !== 0) return true;
+      if (obj.timed_out) return true;
+      return false;
+    }
+  } catch { /* not JSON */ }
+  return /^(error|denied|failed)\b/i.test(s);
+}
+
+// Bookkeeping calls are not steps of the procedure.
+const NOT_A_STEP = /^(personal_autoflow_|personal_skill_|meta_(search|describe|list|capabilities))/;
+const MAX_SAVED_STEPS = 8;
+
+// "Can we train Dest itself?" -- the durable half: a computer task that
+// ended with every real call succeeding is saved as an autoflow, so
+// personal_autoflow_match (step 1 of the COMPUTER playbook) hands the
+// model the exact tool sequence next time instead of a fresh discovery.
+// Nothing is saved from a turn with a failed or denied call, a turn with
+// no real steps, or one long enough to be a wander rather than a recipe.
+function flowSteps(ledger) {
+  const calls = (ledger || []).filter((e) => !NOT_A_STEP.test(String(e.tool || '')));
+  if (!calls.length || calls.length > MAX_SAVED_STEPS) return null;
+  if (!calls.every((e) => e.ok)) return null;
+  return calls.map((e) => ({ tool: e.tool, args: e.args || {} }));
+}
+
+async function autoSaveFlow({ client, goal, ledger, response }) {
+  if (!client || typeof client.invoke !== 'function') return null;
+  const steps = flowSteps(ledger);
+  if (!steps) return null;
+  try {
+    const out = await client.invoke('personal_autoflow_record', {
+      goal: String(goal || '').slice(0, 300),
+      steps,
+      eval: { source: 'dest-chat', calls: steps.length },
+    }, { autoApprove: true });
+    const data = (out && out.data) || out || {};
+    const saved = data.saved || data;
+    const id = saved && saved.id ? ` ${saved.id}` : '';
+    if (response && typeof response.markdown === 'function') {
+      response.markdown(`\n\n*learned: ${steps.length} step${steps.length === 1 ? '' : 's'} saved for "${clip(goal, 60)}"${id}*`);
+    }
+    return steps;
+  } catch {
+    return null; // learning is a bonus; the task already succeeded
+  }
 }
 
 async function closeRound({ client, vscode, sessionId, kind, drivePlan, onPlan }) {
@@ -822,6 +951,7 @@ async function handleTurn({
           try { onPlan({ ...drivePlan, turn: drivePlan }); } catch { /* Plan panel is optional */ }
         }
         done = true;
+        await autoSaveFlow({ client, goal: userLine, ledger: ran.ledger, response });
         break;
       }
       drivePlan = kind === 'session'
@@ -934,6 +1064,9 @@ module.exports = {
   invokeTool,
   approvalText,
   plainCommand,
+  describeCommand,
+  callFailed,
+  flowSteps,
   autoApprove,
   shellAutoApprove,
   shellAskReason,
