@@ -791,9 +791,13 @@ async function autoSaveFlow({ client, goal, ledger, response }) {
       steps,
       eval: { source: 'dest-chat', calls: steps.length },
     }, { autoApprove: true });
-    const data = (out && out.data) || out || {};
-    const saved = data.saved || data;
-    const id = saved && saved.id ? ` ${saved.id}` : '';
+    // The bridge envelope is {ok, data:{saved:{id,...}}}. A 500 with an
+    // empty body comes back from client.invoke as {} -- not a save.
+    if (!out || out.ok === false || out.error) return null;
+    const data = (out && out.data) || {};
+    const saved = data.saved && typeof data.saved === 'object' ? data.saved : null;
+    if (!saved) return null;
+    const id = saved.id ? ` ${saved.id}` : '';
     if (response && typeof response.markdown === 'function') {
       response.markdown(`\n\n*learned: ${steps.length} step${steps.length === 1 ? '' : 's'} saved for "${clip(String(goal || '').replace(/^(?:@at\s+)+/i, '').trim(), 60)}"${id}*`);
     }

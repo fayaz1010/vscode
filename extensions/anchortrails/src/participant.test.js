@@ -765,6 +765,21 @@ describe('the tool loop', () => {
     assert.match(response.parts.join(''), /\*learned: 1 step saved for "ask claude desktop what is 9x8" af01\*/);
   });
 
+  it('a bridge reply without a saved row is not announced as learned', async () => {
+    // Live: personal_autoflow_record answered 500 with an empty body; the
+    // chat still printed "learned: 1 step saved".
+    const { vscode } = toolHost({
+      onInvoke: () => ({ content: [{ value: '{"text":"42"}' }] }),
+      replies: [[{ callId: 'c1', name: 'desktop_llm_prompt', input: { prompt: 'x' } }], [{ value: '42.' }]],
+    });
+    for (const reply of [{}, { ok: false, error: 'db locked' }, { ok: true, data: {} }]) {
+      const client = computerClient({ async invoke() { return reply; } });
+      const response = stream();
+      await handleTurn({ client, vscode, request: { prompt: 'ask claude desktop x' }, context: { history: [] }, response });
+      assert.ok(!response.parts.join('').includes('learned:'), JSON.stringify(reply));
+    }
+  });
+
   it('nothing is learned from a turn with a failed, denied or non-zero call, and a save error never fails the turn', async () => {
     const { callFailed, flowSteps } = require('./participant');
     assert.equal(callFailed('{"error":"focus step: focus failed"}'), true);
