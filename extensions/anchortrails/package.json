@@ -92,7 +92,9 @@
       },
       {
         "command": "anchortrails.home.openEditor",
-        "title": "AnchorTrails: Open AT Panel"
+        "title": "Open AT Panel",
+        "icon": "$(window)",
+        "category": "AnchorTrails"
       },
       {
         "command": "anchortrails.surface.pick",
@@ -207,6 +209,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "anchortrails.home.openEditor",
+          "when": "view == anchortrails.home",
+          "group": "navigation@0"
+        },
         {
           "command": "anchortrails.panel.refresh",
           "when": "view == anchortrails.home || view == anchortrails.plan || view == anchortrails.nodes || view == anchortrails.teams || view == anchortrails.vault || view == anchortrails.models || view == anchortrails.workspace",
