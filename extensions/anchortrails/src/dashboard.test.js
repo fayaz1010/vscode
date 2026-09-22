@@ -264,3 +264,17 @@ describe('the plan lands like a stream, under its nodes', () => {
     assert.ok(!/planned here.*planned here.*planned here/s.test(svg), 'root has no badge');
   });
 });
+
+describe('the dashboard says whether the work is ready', () => {
+  const { dashboardHtml } = require('./dashboard');
+  const esc = (v) => String(v ?? '');
+  const base = { ok: true, overview: { meta: {}, zones: [], zone_edges: [] }, plan: { tasks: [] } };
+
+  it('shows the verdict as its own chip, with the reason on hover', () => {
+    const more = dashboardHtml({ ...base, assessment: { verdict: 'more_work', why: 'still unfinished (p=0.81)' } }, esc);
+    assert.match(more, /<span class="chip warn" title="still unfinished \(p=0\.81\)">more work<\/span>/);
+    const ready = dashboardHtml({ ...base, assessment: { verdict: 'ready', why: 'ready (p=0.88)' } }, esc);
+    assert.match(ready, /<span class="chip ok" title="ready \(p=0\.88\)">ready<\/span>/);
+    assert.ok(!/chip[^>]*>(ready|more work)</.test(dashboardHtml(base, esc)), 'no verdict, no chip');
+  });
+});

@@ -225,3 +225,31 @@ describe('a job outlives the turn that started it', () => {
     assert.ok(reads >= 3, 'two quiet reads are allowed before giving up on a job we just started');
   });
 });
+
+describe('the step between finishing and shipping', () => {
+  it('the assessment is news every time it moves, and decides whether anything ships', async () => {
+    const answers = [
+      { running: true, progress: { task: 't.a', phase: 'asking the model' }, run: { status: 'running', results: [] } },
+      { running: true, run: { status: 'complete', closed: 1, results: [{ task: 't.a', outcome: 'closed', attempts: 1 }] },
+        assessment: { verdict: 'more_work', why: 'still unfinished (p=0.81 vs ready 0.20)' } },
+      { running: false, run: { status: 'complete', closed: 1, results: [{ task: 't.a', outcome: 'closed', attempts: 1 }] },
+        assessment: { verdict: 'ready', why: 'ready (p=0.88)' }, ship: { status: 'shipped', deploy_url: 'https://x' } },
+    ];
+    let i = 0;
+    const client = { async map() { return answers[Math.min(i++, answers.length - 1)]; } };
+    const response = stream();
+    await streamJob({ client, repo: 'x', kind: 'run', response, sleep: async () => {} });
+    const text = response.parts.join('\n');
+    assert.match(text, /· assessment: more work — still unfinished/);
+    assert.match(text, /✓ assessment: ready — ready \(p=0\.88\)/);
+    assert.match(text, /ship: shipped/);
+  });
+
+  it('a verdict already on disk when we attach is history, like the rest', async () => {
+    const seen = { verdict: 'ready', why: 'ready (p=0.9)' };
+    const client = { async map() { return { running: false, assessment: seen, run: { status: 'complete', results: [] } }; } };
+    const response = stream();
+    await streamJob({ client, repo: 'x', kind: 'run', response, attach: true, sleep: async () => {} });
+    assert.ok(!response.parts.join('\n').includes('assessment'), 'not announced as if it just happened');
+  });
+});

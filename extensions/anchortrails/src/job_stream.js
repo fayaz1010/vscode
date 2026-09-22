@@ -51,6 +51,14 @@ function diffEvents(prev, next, kind) {
       const cost = money(r.cost_usd != null ? r.cost_usd : r.cost);
       out.push(`- ${mark} ${shortTask(r.task)} — ${r.outcome || 'done'}${r.attempts ? ` after ${r.attempts} attempt${r.attempts === 1 ? '' : 's'}` : ''}${cost ? ` · ${cost}` : ''}${r.why ? `: ${String(r.why).slice(0, 120)}` : ''}`);
     }
+    // THE STEP BETWEEN FINISHING AND SHIPPING. The run ending says the tasks are
+    // done; this says whether the thing they were for can go out, and it decides
+    // whether anything ships at all -- so it is news every time it moves.
+    const pa = p.assessment || {}; const na = n.assessment || {};
+    if (na.verdict && (na.verdict !== pa.verdict || na.why !== pa.why)) {
+      const mark = na.verdict === 'ready' ? '✓' : na.verdict === 'more_work' ? '·' : '?';
+      out.push(`- ${mark} assessment: ${String(na.verdict).replace('_', ' ')}${na.why ? ` — ${na.why}` : ''}`);
+    }
     const ps = p.ship || {}; const ns = n.ship || {};
     if (ns.status && (ns.status !== ps.status || ns.summary !== ps.summary)) {
       out.push(`- ship: ${ns.status}${ns.summary ? ` — ${ns.summary}` : ''}${ns.deploy_url ? ` — ${ns.deploy_url}` : ''}${ns.branch ? ` (branch ${ns.branch})` : ''}`);
@@ -135,7 +143,8 @@ async function streamJob({ client, repo, kind, response, token, attach = false, 
         // Attaching to someone else's job: the plan it is working from was
         // already there too, so it is history like the results. A job we
         // started ourselves may still be building its plan -- that is news.
-        prev = attach ? { run: map.run, ship: map.ship, plan: map.plan } : { run: map.run, ship: map.ship };
+        prev = attach ? { run: map.run, ship: map.ship, plan: map.plan, assessment: map.assessment }
+          : { run: map.run, ship: map.ship, assessment: map.assessment };
       }
       const events = diffEvents(prev, map, kind);
       for (const line of events) { response.markdown(`\n${line}`); lines += 1; }

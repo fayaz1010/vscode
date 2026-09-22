@@ -140,6 +140,12 @@ function dashboardHtml(map, esc, focusTask) {
   else chips.push('<span class="chip warn">no plan</span>');
   if (map.running) chips.push('<span class="chip busy">run in progress</span>');
   else if (tot.results) chips.push(`<span class="chip${tot.failed ? ' warn' : ' ok'}">last run ${escape(tot.status || 'complete')}</span>`);
+  // WHETHER THE WORK IS READY, not just whether the tasks are done.
+  const verdict = (map.assessment || {}).verdict;
+  if (verdict) {
+    const cls = verdict === 'ready' ? ' ok' : verdict === 'more_work' ? ' warn' : '';
+    chips.push(`<span class="chip${cls}" title="${escape((map.assessment || {}).why || '')}">${escape(String(verdict).replace('_', ' '))}</span>`);
+  }
   if (map.shipping) chips.push('<span class="chip busy">shipping…</span>');
   else if (map.ship && map.ship.status) chips.push(`<span class="chip${map.ship.status === 'shipped' ? ' ok' : ' warn'}">${escape(map.ship.status)}${map.ship.deploy && map.ship.deploy.url ? ' · ' + (map.ship.deploy.prod ? 'prod' : 'preview') : ''}</span>`);
 
