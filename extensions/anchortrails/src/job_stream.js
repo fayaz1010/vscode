@@ -63,6 +63,40 @@ function diffEvents(prev, next, kind) {
   return out;
 }
 
+// ONE LIVE LINE, NOT A LINE PER POLL.
+//
+// `response.progress(text)` APPENDS in the chat, so saying the same thing every
+// four seconds printed it four times over. The chat has a better shape for this:
+// `progress(text, task)` pushes a `progressTask`, which the UI renders with a
+// spinner for as long as the task's thenable is pending and marks complete when
+// it settles. So each state gets exactly one line that visibly spins while Dest
+// is on it, and finishes when Dest moves on.
+//
+// A host that only knows the one-argument form ignores the second and gets the
+// old behaviour -- one deduped line per state, which is still not a repeat.
+function speaker(response) {
+  let pending = null;
+  const settle = (text) => {
+    if (!pending) return;
+    const done = pending.done;
+    pending = null;
+    try { done(text); } catch { /* the turn may already be finished */ }
+  };
+  return {
+    say(text) {
+      if (pending && pending.text === text) return;   // already spinning on this
+      settle();
+      if (!text || typeof response.progress !== 'function') return;
+      let done;
+      const until = new Promise((resolve) => { done = resolve; });
+      pending = { text, done };
+      try { response.progress(text, () => until); } catch { /* host without tasks */ }
+    },
+    end(text) { settle(text); },
+    get spinning() { return pending ? pending.text : ''; },
+  };
+}
+
 function jobAlive(map, kind) {
   const m = map || {};
   if (kind === 'run') return Boolean(m.running || m.shipping);
@@ -78,10 +112,10 @@ async function streamJob({ client, repo, kind, response, token, pollMs = Number(
   let lines = 0;
   let started = false;
   let idle = 0;
-  let said = '';
   let baselined = false;
+  const say = speaker(response);
   for (;;) {
-    if (token && token.isCancellationRequested) return { lines, ended: 'cancelled' };
+    if (token && token.isCancellationRequested) { say.end(); return { lines, ended: 'cancelled' }; }
     let map;
     try { map = await client.map({ repo }); } catch { map = null; }
     if (map) {
@@ -98,27 +132,26 @@ async function streamJob({ client, repo, kind, response, token, pollMs = Number(
       }
       const events = diffEvents(prev, map, kind);
       for (const line of events) { response.markdown(`\n${line}`); lines += 1; }
-      // ONE LINE PER STATE, NOT PER POLL. progress() appends in the chat, so a
-      // four-second poll wrote "run…" (or the same task and phase) over and over
-      // -- the "series of run…" the user saw. Only a changed state speaks.
-      if (typeof response.progress === 'function') {
-        const pr = map.progress;
-        const now = kind === 'run' && pr && pr.task ? `${shortTask(pr.task)} · ${pr.phase || 'working'}` : `${kind}…`;
-        if (now !== said) { response.progress(now); said = now; }
-      }
       const alive = jobAlive(map, kind);
       if (alive) { started = true; idle = 0; } else if (started || idle >= 2) {
         // The job's flag is down and we saw it up (or never came up after two
         // reads): it is over. One last diff already ran above.
+        say.end();
         return { lines, ended: 'done' };
       } else {
         idle += 1;
       }
+      // Only while there is something to watch: a finished job's last read must
+      // not open a fresh spinner nobody will ever settle.
+      const pr = map.progress;
+      say.say(kind === 'run' && pr && pr.task
+        ? `${shortTask(pr.task)} · ${pr.phase || 'working'}${pr.model ? ` · ${pr.model}` : ''}`
+        : `${kind}…`);
       prev = map;
     }
-    if (clock() - t0 > maxMs) { response.markdown('\n- still running; `/run status` for the totals'); return { lines, ended: 'timeout' }; }
+    if (clock() - t0 > maxMs) { say.end(); response.markdown('\n- still running; `/run status` for the totals'); return { lines, ended: 'timeout' }; }
     await wait(pollMs);
   }
 }
 
-module.exports = { streamJob, diffEvents, jobAlive, shortTask, DEFAULT_POLL_MS };
+module.exports = { streamJob, diffEvents, jobAlive, shortTask, speaker, DEFAULT_POLL_MS };

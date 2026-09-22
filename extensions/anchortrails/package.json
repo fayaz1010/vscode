@@ -12,7 +12,8 @@
   "enabledApiProposals": [
     "defaultChatParticipant",
     "languageModelToolSupportsModel",
-    "chatProvider"
+    "chatProvider",
+    "chatParticipantAdditions"
   ],
   "main": "./src/extension.js",
   "activationEvents": [

@@ -8,6 +8,30 @@ function stream() {
   return { parts, markdown: (s) => parts.push(s), progress: (s) => parts.push(`[${s}]`) };
 }
 
+// A chat that understands progressTask: each line stays "spinning" until its
+// thenable settles, which is what the UI draws a spinner for.
+function taskStream() {
+  const lines = [];
+  return {
+    lines,
+    markdown() {},
+    progress(text, task) {
+      const row = { text, spinning: true };
+      lines.push(row);
+      if (typeof task === 'function') {
+        Promise.resolve(task({ report() {} })).then((final) => {
+          row.spinning = false;
+          if (typeof final === 'string') row.text = final;
+        });
+      } else {
+        row.spinning = false;
+      }
+    },
+    get live() { return lines.filter((l) => l.spinning).map((l) => l.text); },
+    get texts() { return lines.map((l) => l.text); },
+  };
+}
+
 describe('the chat keeps talking while a job runs', () => {
   it('a run streams task phases, closes with cost, the ship, and the end -- then stops', async () => {
     // Live: "/run" said "Run started" and then nothing for 40 minutes.
@@ -33,7 +57,7 @@ describe('the chat keeps talking while a job runs', () => {
     assert.match(text, /run complete: 2 closed · \$0\.13/);
     assert.match(text, /ship: running — build/);
     assert.match(text, /ship: deploy failed — the host declined the deployment/);
-    assert.match(text, /\[lib-admin-payments\.ts · asking the model\]/, 'the progress line names the task under the pen');
+    assert.match(text, /\[lib-admin-payments\.ts · asking the model · x-ai\/grok-4\.6\]/, 'the progress line names the task under the pen and who is writing it');
     assert.equal(client.map.length, 0);
     assert.equal(waits.length, 4, 'one wait between reads; none after the end');
     assert.equal(waits[0], 7);
@@ -112,5 +136,51 @@ describe('the stream reports this job, not the last one', () => {
     const response = stream();
     await streamJob({ client, repo: 'x', kind: 'map', response, sleep: async () => {} });
     assert.match(response.parts.join('\n'), /stage: shell \(1\/6\)/, 'the first stage is this job, not history');
+  });
+});
+
+describe('one live line per state, with a spinner', () => {
+  const { speaker } = require('./job_stream');
+
+  it('the same state does not print again -- its line is still spinning', async () => {
+    const r = taskStream();
+    const say = speaker(r);
+    say.say('payments.ts · asking the model');
+    say.say('payments.ts · asking the model');
+    say.say('payments.ts · asking the model');
+    assert.equal(r.lines.length, 1, 'one line, however many polls');
+    assert.deepEqual(r.live, ['payments.ts · asking the model'], 'and it is still spinning');
+    say.say('payments.ts · acceptance: typecheck and re-map');
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(r.lines.length, 2);
+    assert.deepEqual(r.live, ['payments.ts · acceptance: typecheck and re-map'], 'the previous line settled');
+    say.end();
+    await Promise.resolve(); await Promise.resolve();
+    assert.deepEqual(r.live, [], 'nothing spins after the job ends');
+  });
+
+  it('a run prints one spinning line per task and phase, never one per poll', async () => {
+    const answers = [
+      { running: true, progress: { task: 't.a', attempt: 1, phase: 'asking the model', model: 'grok' }, run: { status: 'running', results: [] } },
+      { running: true, progress: { task: 't.a', attempt: 1, phase: 'asking the model', model: 'grok' }, run: { status: 'running', results: [] } },
+      { running: true, progress: { task: 't.a', attempt: 1, phase: 'asking the model', model: 'grok' }, run: { status: 'running', results: [] } },
+      { running: true, progress: { task: 't.a', attempt: 1, phase: 'acceptance: typecheck' }, run: { status: 'running', results: [] } },
+      { running: false, run: { status: 'complete', closed: 1, results: [{ task: 't.a', outcome: 'closed', attempts: 1 }] } },
+    ];
+    let i = 0;
+    const client = { async map() { return answers[Math.min(i++, answers.length - 1)]; } };
+    const r = taskStream();
+    await streamJob({ client, repo: 'x', kind: 'run', response: r, sleep: async () => {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert.deepEqual(r.texts, ['a · asking the model · grok', 'a · acceptance: typecheck'],
+      'three identical polls made one line; the phase change made the second');
+    assert.deepEqual(r.live, [], 'the job ended, so nothing is left spinning');
+  });
+
+  it('a host that only knows progress(text) still gets one line per state', async () => {
+    const r = stream();
+    const say = speaker(r);
+    say.say('map…'); say.say('map…'); say.say('plan…'); say.end();
+    assert.deepEqual(r.parts, ['[map…]', '[plan…]']);
   });
 });
