@@ -12,7 +12,7 @@
  * Absent is a state: a folder with no map yet shows the buttons that make one.
  */
 const { runIndex, runMark, mapActions, shipLine, progressHtml, liveFile, nextStepHtml } = require('./plan');
-const { graphSvg, zoneOfFile } = require('./map_graph');
+const { zoneOfFile } = require('./map_graph');
 
 // "symbol (marker, line N)" -- the planner's deliverable line. The line is what makes
 // the row a link into the code; a deliverable that does not carry one links nowhere.
@@ -190,38 +190,10 @@ function dashboardHtml(map, esc, focusTask) {
         <span class="seg good" style="width:${pct(tot.closed)}"></span><span class="seg bad" style="width:${pct(tot.failed)}"></span></div>`
     : '';
 
-  // BY MARKER and BY ZONE. Where the findings are, by kind and by place. The bar is
-  // the actionable share of the largest row; the number is the count.
-  const markers = markerRows(map.overview);
-  const maxM = Math.max(...markers.map((r) => r.total), 1);
-  const markerList = markers.length
-    ? `<h3>Findings by marker</h3>${markers.map((r) => `<div class="drow">
-        <span class="dname">${escape(r.name)}${r.tier ? ` <span class="tier">${escape(r.tier)}</span>` : ''}</span>
-        <span class="dbar"><span class="seg all" style="width:${Math.round((r.total / maxM) * 100)}%"></span><span class="seg act" style="width:${Math.round((r.actionable / maxM) * 100)}%"></span></span>
-        <span class="dnum">${r.actionable}${r.total !== r.actionable ? `<small>/${r.total}</small>` : ''}</span>
-      </div>`).join('')}`
-    : '';
-  // an analysed zone with nothing found is green; a zone nobody read is grey
-  const colour = (z) => {
-    const s = Number(z.colour || 0);
-    if (!(z.findings_total || 0)) return '#3fb950';
-    return s >= 0.7 ? '#e2533f' : s >= 0.5 ? '#c2811f' : s >= 0.3 ? '#8a7b28' : '#6b7484';
-  };
-  const maxZ = Math.max(...zones.map((z) => Number(z.findings_total || 0)), 1);
-  const greyFiles = grey.reduce((n, z) => n + Number(z.files || 0), 0);
-  const greyRow = grey.length
-    ? `<div class="drow dgrey">
-        <span class="dname"><span class="mdot" style="background:#4a5160"></span>not analysed yet</span>
-        <span class="dbar"><span class="seg all" style="width:${Math.round((greyFiles / Math.max(greyFiles + Number(meta.files_analysed || 0), 1)) * 100)}%"></span></span>
-        <span class="dnum">${grey.length}<small> zones · ${greyFiles.toLocaleString()} files</small></span>
-      </div>`
-    : '';
-  const zoneList = zones.length || grey.length
-    ? `<h3>Zones</h3>${zones.map((z) => `<div class="drow">
-        <span class="dname"><span class="mdot" style="background:${colour(z)}"></span>${escape(z.zone)}</span>
-        <span class="dbar"><span class="seg act" style="width:${Math.round((Number(z.findings_total || 0) / maxZ) * 100)}%;background:${colour(z)}"></span></span>
-        <span class="dnum">${Number(z.findings_total || 0)}<small> · ${Number(z.files || 0)} files</small></span>
-      </div>`).join('')}${greyRow}`
+  // The picture of the code, what it found by kind and where -- all on the Map
+  // tab now. Two tabs were drawing the same thing and neither was the whole of it.
+  const toMap = (map.overview && (map.overview.zones || []).length)
+    ? '<p class="muted dtomap">The code itself, and everything the map found, is on the <button data-tab="map" class="dlink">Map</button> tab.</p>'
     : '';
 
   // TASKS. One row per plan task: the run's mark, what it is to deliver (linked into
@@ -299,17 +271,17 @@ function dashboardHtml(map, esc, focusTask) {
     ${shipLine(map, escape)}
     ${progressHtml(map, escape)}
     ${actions}
-    ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4, live: liveFile(map), tasksByZone: Object.fromEntries([...byZone.entries()].map(([k, v]) => [k, v.length])) })}
     ${tiles}
     ${modelTable}
     ${progress}
     ${taskList}
-    ${markerList}
-    ${zoneList}
+    ${toMap}
   </section>`;
 }
 
 const DASH_CSS = `
+  .dtomap { margin-top:10px; }
+  .dlink { background:none; border:0; color:#3794ff; cursor:pointer; padding:0; font:inherit; text-decoration:underline; }
   .dasked, .ddone { opacity:.7; margin-top:3px; }
   .dqs { margin-top:5px; } .dqs > summary { cursor:pointer; opacity:.8; }
   .dq { padding:3px 0 3px 10px; border-left:2px solid #2b3345; margin-top:4px; }

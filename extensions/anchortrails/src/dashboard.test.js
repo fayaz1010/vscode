@@ -44,7 +44,7 @@ describe('Dashboard tab', () => {
     assert.match(dashboardHtml({ loading: true }, esc), /Asking the AT node/, 'the first paint is a question, not "no map"');
   });
 
-  it('sums the envelope: chips, numbers, progress, tasks, markers, zones', () => {
+  it('sums the envelope: chips, numbers, progress, tasks', () => {
     const html = dashboardHtml(MAP, esc);
     assert.match(html, /chip ok">map current · abcdef12/);
     assert.match(html, /chip">plan rev 2 · 3 tasks/);
@@ -72,18 +72,7 @@ describe('Dashboard tab', () => {
     assert.match(html, /<span class="dmark">·<\/span> <b>ext-src-home\.js<\/b><span class="muted"> · no budget/);
     assert.match(html, /<b>a thing with no line<\/b><\/div>/, 'no line: no link');
     assert.match(html, /<div class="meta">waiting<\/div>/, 'a run in progress: the task not yet reached is waiting');
-    // markers: actionable over total, tier from the overview, sorted by actionable
-    const markers = html.slice(html.indexOf('Findings by marker'));
-    assert.ok(markers.indexOf('bus_factor') < markers.indexOf('config_orphan'));
-    assert.ok(markers.indexOf('config_orphan') < markers.indexOf('stub_body'));
-    assert.match(markers, /bus_factor <span class="tier">C<\/span>/);
-    assert.match(markers, /<span class="dnum">0<small>\/16<\/small>/);
-    assert.match(markers, /todo_debt/);
-    // zones by size, with the zone's colour
-    const zones = html.slice(html.indexOf('<h3>Zones</h3>'));
-    assert.ok(zones.indexOf('ext/src') < zones.indexOf('ext/test'));
-    assert.match(zones, /background:#e2533f"><\/span>ext\/src/);
-    assert.match(zones, /20<small> · 46 files/);
+    // Findings by kind and the zone chart are the Map's now -- see the split test below.
     // the three moves, from the same helper the Map uses
     assert.match(html, /data-id="\/run status"/);
     assert.match(html, /data-id="\/map plan"/);
@@ -110,17 +99,13 @@ describe('Dashboard tab', () => {
     assert.match(building, /chip busy">mapping 2\/6/);
   });
 
-  it('grey zones are one row, clean zones are green, and the files-read tile leads', () => {
+  it('the files-read tile leads, and a structure-only map says so', () => {
     const map = { ...MAP, overview: { ...MAP.overview,
       meta: { ...MAP.overview.meta, files_total_repo: 14197, files_analysed: 48 },
       zones: [...MAP.overview.zones, { zone: 'src/vs', findings_total: 0, files: 9313, analysed: false },
         { zone: 'ext/clean', findings_total: 0, files: 2, analysed: true, colour: 0 }] } };
     const html = dashboardHtml(map, esc);
     assert.match(html, /<div class="num">48<small>\/14,197<\/small><\/div><div class="meta">files read/);
-    assert.match(html, /background:#3fb950"><\/span>ext\/clean/, 'analysed, nothing found: green');
-    assert.match(html, /not analysed yet<\/span>/);
-    assert.match(html, /<span class="dnum">1<small> zones · 9,313 files/);
-    assert.doesNotMatch(html, /<\/span>src\/vs</, 'a grey zone is counted, not listed');
     const shell = dashboardHtml({ ...map, overview: { ...map.overview, meta: { ...map.overview.meta, status: 'shell' } } }, esc);
     assert.match(shell, /chip warn">structure only — not analysed/);
     assert.doesNotMatch(shell, /class="dash building/);
@@ -306,5 +291,45 @@ describe('the objective, as it was understood', () => {
   it('a plain objective with no structure still shows as it always did', () => {
     const html = dashboardHtml({ ...base, objective: 'fix the endpoint mismatches' }, esc);
     assert.match(html, /<p class="dobjective"><span class="muted">objective<\/span> fix the endpoint mismatches<\/p>/);
+  });
+});
+
+describe('the tabs stop repeating each other', () => {
+  const { dashboardHtml } = require('./dashboard');
+  const { mapHtml } = require('./plan');
+  const esc = (v) => String(v ?? '');
+  const map = {
+    ok: true, objective: 'make the admin screens reachable',
+    objective_detail: { goal: 'Make the admin screens reachable', questions: [] },
+    currency: { state: 'current', tree_head: 'd5221b41' },
+    overview: { meta: { markers: { never_referenced: { count: 3, tier: 'A' } } },
+                zones: [{ zone: 'lib/admin', slug: 'lib-admin', files: 2, findings_total: 3, by_marker: { never_referenced: 3 }, top: [] }],
+                zone_edges: [] },
+    plan: { tasks: [{ id: 't.a', title: 'lib/admin/x.ts: build', deliverables: [], execution: { write_scope: ['lib/admin/x.ts'] } }] },
+  };
+
+  it('the Dashboard is the work: no code picture, no findings-by-kind, no zone chart', () => {
+    const html = dashboardHtml(map, esc);
+    assert.ok(!html.includes('<svg'), 'the graph lives on the Map');
+    assert.ok(!html.includes('Findings by marker') && !html.includes('Findings by kind'));
+    assert.ok(!html.includes('<h3>Zones</h3>'));
+    assert.match(html, /<h3>Tasks<\/h3>/, 'what it still owns');
+    assert.match(html, /is on the <button data-tab="map" class="dlink">Map<\/button> tab/, 'and says where the rest went');
+  });
+
+  it('the Map is the code: the picture, what was found and where -- and none of the work', () => {
+    const html = mapHtml(map, esc);
+    assert.match(html, /<svg/);
+    assert.match(html, /<h3>Findings by kind<\/h3>/);
+    assert.match(html, /lib\/admin/);
+    assert.ok(!html.includes('mnext'), 'the next step belongs to the Dashboard');
+    assert.ok(!html.includes('objective:'), 'so does the objective');
+    assert.ok(!html.includes('mnow'), 'and the run progress');
+    assert.match(html, /1 task planned here/, 'the task badge moved with the graph');
+  });
+
+  it('the third tab says which plan it is', () => {
+    const { TABS } = require('./at_shell');
+    assert.equal(TABS.find((t) => t.id === 'plan').label, 'Chat plan');
   });
 });

@@ -156,7 +156,7 @@ function stackHtml(stack, esc) {
  *
  * Absent is a state, not an error. A folder with no map yet says so in one line.
  */
-const { graphSvg } = require('./map_graph');
+const { graphSvg, zoneOfFile } = require('./map_graph');
 
 const CHECK_RX = /reports no `([^`]+)` for `([^`]+)`(?: in `([^`]+)`)?/;
 
@@ -266,6 +266,44 @@ function nextStepHtml(map, esc) {
     ? `<span class="mnextbtn busy">${escape(step.label)}</span>`
     : `<button data-cmd="chat" data-id="${escape(step.cmd)}"${step.draft ? ' data-draft="1"' : ''} class="mnextbtn">${escape(step.label)}</button>`;
   return `<div class="mnext">${button}<span class="mnextwhy">${escape(step.why)}</span></div>`;
+}
+
+// FINDINGS BY KIND. Moved off the Dashboard: what the map found is a property of
+// the code, and the Dashboard is about the work. Two tabs were drawing it.
+function markerRows(overview) {
+  const meta = (overview && overview.meta) || {};
+  const tiers = meta.markers || {};
+  const acc = {};
+  for (const z of (overview && overview.zones) || []) {
+    for (const [m, n] of Object.entries(z.by_marker || {})) {
+      acc[m] = acc[m] || { name: m, actionable: 0, total: 0 };
+      acc[m].actionable += Number(n || 0);
+    }
+    for (const [m, n] of Object.entries(z.by_marker_all || {})) {
+      acc[m] = acc[m] || { name: m, actionable: 0, total: 0 };
+      acc[m].total += Number(n || 0);
+    }
+  }
+  if (!Object.keys(acc).length) {
+    for (const [m, row] of Object.entries(tiers)) {
+      if (row && Number(row.count || 0) > 0) acc[m] = { name: m, actionable: Number(row.count), total: Number(row.count) };
+    }
+  }
+  return Object.values(acc)
+    .map((r) => ({ ...r, tier: (tiers[r.name] || {}).tier || '' }))
+    .sort((a, b) => b.actionable - a.actionable || b.total - a.total);
+}
+
+function markerListHtml(overview, esc) {
+  const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
+  const rows = markerRows(overview);
+  if (!rows.length) return '';
+  const max = Math.max(...rows.map((r) => r.total), 1);
+  return `<h3>Findings by kind</h3>${rows.map((r) => `<div class="drow">
+      <span class="dname">${escape(r.name)}${r.tier ? ` <span class="tier">${escape(r.tier)}</span>` : ''}</span>
+      <span class="dbar"><span class="seg all" style="width:${Math.round((r.total / max) * 100)}%"></span><span class="seg act" style="width:${Math.round((r.actionable / max) * 100)}%"></span></span>
+      <span class="dnum">${r.actionable}${r.total !== r.actionable ? `<small>/${r.total}</small>` : ''}</span>
+    </div>`).join('')}`;
 }
 
 function mapActions(map, esc) {
@@ -395,11 +433,6 @@ function mapHtml(map, esc) {
     : cur.state === 'current'
       ? `<p class="muted">map current at ${escape(String(cur.tree_head || '').slice(0, 8))}</p>`
       : '';
-  const objectiveLine = map && map.can_plan
-    ? (objective
-      ? `<p class="muted mobjective">objective: ${escape(objective)}</p>`
-      : '<p class="muted mobjective">no objective yet — the plan comes from one: Plan…, or <code>/map plan &lt;objective&gt;</code> in @at</p>')
-    : '';
   if (map && map.loading) {
     return '<section class="map"><h3>Map</h3><p class="muted">Asking the AT node for the map of this folder…</p></section>';
   }
@@ -476,13 +509,23 @@ function mapHtml(map, esc) {
     planned ? `${planned} planned task${planned === 1 ? '' : 's'}` : 'no plan yet',
     escape(stage),
   ].concat(read ? [escape(read)] : []).concat(summary ? [escape(summary)] : []).join(' · ')}</p>`;
-  const graph = graphSvg(map.overview, escape, { live: liveFile(map) });
+  // How many planned tasks each zone holds -- the badge moved here with the graph.
+  const zonesAll = (map.overview && map.overview.zones) || [];
+  const tasksByZone = {};
+  for (const t of (map.plan && map.plan.tasks) || []) {
+    const scope = (t.execution && t.execution.write_scope) || [];
+    const title = String(t.title || '');
+    const path = scope[0] || (title.includes(':') ? title.slice(0, title.indexOf(':')) : '');
+    const slug = zoneOfFile(path, zonesAll);
+    if (slug) tasksByZone[slug] = (tasksByZone[slug] || 0) + 1;
+  }
+  const graph = graphSvg(map.overview, escape, { height: 380, live: liveFile(map), tasksByZone });
   const cleanRows = clean.map((z) => `<div class="mclean" id="z-${escape(z.slug || '')}"><span class="mdot" style="background:#3fb950"></span><b>${escape(z.zone)}</b><span class="muted"> · ${Number(z.files || 0)} files · nothing found</span></div>`).join('');
   const greyBlock = greyZonesHtml(grey, escape, { mapping: mapping || building });
   const body = zones.length || cleanRows || greyBlock
-    ? graph + zones.map(zoneBlock).join('') + cleanRows + greyBlock
+    ? graph + markerListHtml(map.overview, escape) + zones.map(zoneBlock).join('') + cleanRows + greyBlock
     : '<p class="muted">Nothing flagged. A green map means "nothing we can see", never "healthy".</p>';
-  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${objectiveLine}${nextStepHtml(map, escape)}${shipLine(map, escape)}${progressHtml(map, escape)}${actions}${body}</section>`;
+  return `<section class="map${building ? ' building' : ''}${running ? ' running' : ''}${shellOnly ? ' shell' : ''}"><h3>Map</h3>${head}${currencyLine}${actions}${body}</section>`;
 }
 
 const MAP_CSS = `
@@ -684,6 +727,8 @@ function startPlan(client, vscode) {
 
 module.exports = {
   liveFile,
+  markerRows,
+  markerListHtml,
   nextStep,
   nextStepHtml,
   runIndex,

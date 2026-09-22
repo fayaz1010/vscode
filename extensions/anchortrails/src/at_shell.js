@@ -31,7 +31,9 @@ const FALLBACK_SURFACES = [
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'map', label: 'Map' },
-  { id: 'plan', label: 'Plan' },
+  // 'Plan' meant two different things: the tasks repo-dash will run (Dashboard)
+  // and the chat's own card for what it is doing (here).
+  { id: 'plan', label: 'Chat plan' },
   { id: 'models', label: 'Models' },
   { id: 'tools', label: 'Tools' },
   { id: 'nodes', label: 'Nodes' },
