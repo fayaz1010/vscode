@@ -173,6 +173,27 @@ function startHome(client, vscode, extras = {}) {
   let modelExtra = {};
   let lastMap = null;
   let pollTimer = null;
+  // THE GRAPH BELOW THE ZONES, cached per map head. Partial answers (files known,
+  // symbols not yet) are never cached: the next ask must see graphify land.
+  const graphCache = { head: null, files: null, zones: {} };
+
+  function graphHead(map) {
+    return (map && map.currency && map.currency.map_head) || (map && map.overview && map.overview.meta && map.overview.meta.head) || '';
+  }
+
+  async function graphFor(zone) {
+    if (!client || typeof client.mapGraph !== 'function') return { ok: false, reason: 'no bridge' };
+    const head = graphHead(lastMap);
+    if (graphCache.head !== head) { graphCache.head = head; graphCache.files = null; graphCache.zones = {}; }
+    if (!zone && graphCache.files) return graphCache.files;
+    if (zone && graphCache.zones[zone]) return graphCache.zones[zone];
+    let out;
+    try { out = await client.mapGraph({ repo: folderPath(vscode) || '', zone, depth: zone ? 2 : 1 }); } catch (err) { out = { ok: false, reason: String((err && err.message) || err) }; }
+    if (out && out.ok && !out.partial) {
+      if (zone) graphCache.zones[zone] = out; else graphCache.files = out;
+    }
+    return out;
+  }
 
   function overlay(data) {
     if (!data || !lastCheck) return data;
@@ -194,6 +215,17 @@ function startHome(client, vscode, extras = {}) {
       if (msg.cmd === 'tab') {
         tab = msg.tab || 'dashboard';
         paint();
+        return;
+      }
+      if (msg.cmd === 'graph') {
+        // The webview asks for the level below the zones -- all files (no zone), or
+        // one zone's symbols and edges -- and gets it back as a message, so the
+        // picture fills in without a repaint.
+        const zone = msg.zone ? String(msg.zone) : '';
+        const data = await graphFor(zone);
+        const target = editor && editor.webview && typeof editor.webview.postMessage === 'function' ? editor.webview
+          : (view && view.webview && typeof view.webview.postMessage === 'function' ? view.webview : null);
+        if (target) target.postMessage({ cmd: 'graph', zone, data });
         return;
       }
       if (msg.cmd === 'open-code') {

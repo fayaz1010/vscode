@@ -119,3 +119,17 @@ describe('AT middle shell', () => {
     assert.match(settings, /Unlimited/);
   });
 });
+
+describe('the graph loads like a stream', () => {
+  it('the shell script asks for the level below on load, draws files into zones, opens a zone on click, and keeps the open zone across repaints', () => {
+    const { shellHtml } = require('./at_shell');
+    const html = shellHtml({ map: { ok: true, overview: { zones: [{ zone: 'lib', slug: 'lib', files: 2 }], zone_edges: [] } } }, 'map');
+    assert.match(html, /cmd: 'graph', zone: zone \|\| ''/, 'asks the extension, never the bridge');
+    assert.match(html, /ask\(''\);/, 'depth 1 for every zone as soon as the zones are drawn');
+    assert.match(html, /drawFiles\(m\.data\)/);
+    assert.match(html, /openZone = g\.dataset\.zone; save\(\); ask\(openZone\)/, 'a click opens the zone');
+    assert.match(html, /vscode\.setState\(\{ \.\.\.saved, openZone \}\)/, 'survives the five-second repaint');
+    assert.match(html, /class="mload"/, 'a place to say how much has been read');
+    assert.match(html, /symbols still being read/, 'partial answers are named as such');
+  });
+});

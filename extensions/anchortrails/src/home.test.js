@@ -115,3 +115,56 @@ describe('the map in the editor host', () => {
     assert.notEqual(mapSig(a), mapSig(stated), 'an objective being stated repaints');
   });
 });
+
+describe('the graph below the zones, in the editor host', () => {
+  function host({ mapGraph }) {
+    const posted = [];
+    let onMessage = null;
+    const webview = {
+      html: '',
+      options: {},
+      onDidReceiveMessage(fn) { onMessage = fn; },
+      postMessage(m) { posted.push(m); },
+    };
+    // visible:false -- the editor starts a 5 s poll while visible, which would keep the test runner alive
+    const panel = { webview, visible: false, reveal() {}, onDidChangeViewState() {}, onDidDispose() {} };
+    const vscode = {
+      ViewColumn: { One: 1 },
+      window: { createWebviewPanel: () => panel },
+      workspace: { workspaceFolders: [{ uri: { fsPath: 'D:\\aozhen' } }] },
+    };
+    const graphs = [];
+    const client = {
+      async sessionPanel() { return {}; },
+      async map() { return { ok: true, currency: { map_head: 'h1' }, overview: { meta: { head: 'h1' }, zones: [] } }; },
+      async mapGraph(args) { graphs.push(args); return mapGraph(args); },
+    };
+    const { startHome } = require('./home');
+    return { vscode, client, webview, posted, graphs, startHome, send: (m) => onMessage(m) };
+  }
+
+  it('answers a graph ask with the level below, keyed by the open folder, and caches only complete answers', async () => {
+    let partial = true;
+    const h = host({ mapGraph: ({ zone }) => (zone
+      ? { ok: true, partial: false, depth: 2, zone, files: [], edges: [] }
+      : { ok: true, partial, depth: 1, zones: { lib: [{ id: 'lib_a', path: 'lib/a.ts', symbols: 2 }] } }) });
+    const home = h.startHome(h.client, h.vscode);
+    await home.openEditor();
+    await h.send({ cmd: 'graph' });
+    assert.equal(h.graphs[0].repo, 'D:\\aozhen');
+    assert.equal(h.graphs[0].depth, 1);
+    assert.equal(h.posted[0].cmd, 'graph');
+    assert.equal(h.posted[0].zone, '');
+    assert.equal(h.posted[0].data.zones.lib[0].path, 'lib/a.ts');
+    await h.send({ cmd: 'graph' });
+    assert.equal(h.graphs.length, 2, 'a partial answer is asked again -- graphify may have landed');
+    partial = false;
+    await h.send({ cmd: 'graph' });
+    await h.send({ cmd: 'graph' });
+    assert.equal(h.graphs.length, 3, 'a complete answer is served from the cache');
+    await h.send({ cmd: 'graph', zone: 'lib' });
+    await h.send({ cmd: 'graph', zone: 'lib' });
+    assert.equal(h.graphs.filter((g) => g.zone === 'lib').length, 1);
+    assert.equal(h.posted[h.posted.length - 1].data.depth, 2);
+  });
+});

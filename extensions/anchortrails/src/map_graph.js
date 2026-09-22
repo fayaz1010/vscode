@@ -127,7 +127,7 @@ function graphSvg(overview, esc, opts = {}) {
   // The controls are wired by the shell's script: full screen (Esc closes), reset the
   // view, and the caption that names the node the view is zoomed on. Wheel zooms,
   // drag pans, a click zooms to the node -- all on the viewBox, no library.
-  const tools = '<div class="mtools"><button type="button" data-graph="full" title="Full screen (Esc closes)">⤢ Full screen</button><button type="button" data-graph="reset" title="Fit the whole map">⟲ Fit</button><span class="mcaption"></span></div>';
+  const tools = '<div class="mtools"><button type="button" data-graph="full" title="Full screen (Esc closes)">⤢ Full screen</button><button type="button" data-graph="reset" title="Fit the whole map">⟲ Fit</button><span class="mcaption"></span><span class="mload"></span></div>';
   return `<div class="mgraph" data-w="${W}" data-h="${H}">${tools}<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
 }
 
@@ -140,6 +140,10 @@ const GRAPH_CSS = `
   .mgraph .mtools button:hover { border-color:#3794ff; }
   .mgraph .mcaption { opacity:.8; margin-left:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .mgraph .mcaption a { color:#7fd3b9; margin-left:6px; }
+  .mgraph .mload { margin-left:auto; font-size:10px; opacity:.6; white-space:nowrap; }
+  .mgraph.partial .mload { color:#c2811f; opacity:.9; }
+  .mgraph .mfile text { pointer-events:none; }
+  .mgraph [data-sym] { cursor:pointer; } .mgraph [data-sym]:hover { stroke:#fff; stroke-width:0.4; }
   .mgraph.full { position:fixed; inset:0; z-index:50; margin:0; border:0; border-radius:0; padding:8px; display:flex; flex-direction:column; }
   .mgraph.full svg { flex:1; max-height:none; height:auto; min-height:0; }
   .mgraph.full .mtools { font-size:12px; } .mgraph.full .mtools button { font-size:12px; padding:4px 10px; }

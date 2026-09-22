@@ -430,3 +430,25 @@ describe('bridge errors read as text', () => {
     assert.doesNotMatch(String(out.reason), /object Object/);
   });
 });
+
+describe('the graph below the zones', () => {
+  it('mapGraph asks per zone and depth, and reads a refusal as a state', async () => {
+    const { BridgeClient } = require('./bridge');
+    const calls = [];
+    const client = new BridgeClient({ url: 'http://b', token: 't' });
+    client._json = async (method, path) => {
+      calls.push({ method, path });
+      if (path.includes('zone=nope')) return { r: { ok: false, status: 404 }, data: { detail: 'no zone nope' } };
+      return { r: { ok: true }, data: { ok: true, depth: path.includes('zone=') ? 2 : 1, zones: {} } };
+    };
+    const top = await client.mapGraph({ repo: 'D:\\aozhen' });
+    assert.equal(calls[0].method, 'GET');
+    assert.equal(calls[0].path, '/api/map/graph?repo=D%3A%5Caozhen&depth=1');
+    assert.equal(top.depth, 1);
+    const deep = await client.mapGraph({ repo: 'D:\\aozhen', zone: 'lib-admin' });
+    assert.equal(calls[1].path, '/api/map/graph?repo=D%3A%5Caozhen&zone=lib-admin&depth=2');
+    assert.equal(deep.depth, 2);
+    const no = await client.mapGraph({ repo: 'D:\\aozhen', zone: 'nope' });
+    assert.deepEqual(no, { ok: false, reason: 'no zone nope' });
+  });
+});

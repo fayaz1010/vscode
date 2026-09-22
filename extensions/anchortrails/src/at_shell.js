@@ -306,6 +306,99 @@ function shellHtml(data, tab, err) {
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && box.classList.contains('full')) { box.classList.remove('full'); const b = box.querySelector('[data-graph="full"]'); if (b) b.textContent = '⤢ Full screen'; }
       });
+      // THE LEVEL BELOW THE ZONES, loaded like a stream. As soon as the zones are
+      // drawn the webview asks the extension for every zone's files (they exist
+      // while the map is still being read; symbols follow when graphify lands) and
+      // draws them as dots inside each zone. A click opens a zone: its files on a
+      // ring, their symbols around each file, the edges among them, and stubs
+      // toward other zones. The open zone and the view survive the panel's repaints
+      // through the webview's own state, so a five-second poll never closes what
+      // the person is looking at. The webview never reads the bridge itself.
+      const NS = 'http://www.w3.org/2000/svg';
+      const mk = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+      const layer = mk('g', { class: 'mfiles' }); svg.appendChild(layer);
+      const openLayer = mk('g', { class: 'mopen' }); svg.appendChild(openLayer);
+      const zoneAt = {};
+      svg.querySelectorAll('[data-zone]').forEach((g) => { const c = g.querySelector('circle'); if (c) zoneAt[g.dataset.zone] = { g, cx: +c.getAttribute('cx'), cy: +c.getAttribute('cy'), r: +c.getAttribute('r') }; });
+      const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; };
+      const saved = (vscode.getState && vscode.getState()) || {};
+      let openZone = saved.openZone || '';
+      const save = () => { if (vscode.setState) vscode.setState({ ...saved, openZone }); };
+      const note = box.querySelector('.mload');
+      const drawFiles = (data) => {
+        while (layer.firstChild) layer.removeChild(layer.firstChild);
+        const zones = (data && data.zones) || {};
+        let n = 0;
+        Object.keys(zones).forEach((slug) => {
+          const z = zoneAt[slug]; if (!z) return;
+          const files = zones[slug] || []; const k = files.length;
+          files.forEach((f, i) => {
+            const a = 2 * Math.PI * (i / Math.max(1, k)) + hash(f.path) * 0.9;
+            const rr = z.r * (0.25 + 0.55 * hash(f.path + '#'));
+            const dot = mk('circle', { cx: (z.cx + Math.cos(a) * rr).toFixed(1), cy: (z.cy + Math.sin(a) * rr).toFixed(1), r: Math.min(1.6, 0.35 + Math.sqrt(f.symbols || 0) * 0.22).toFixed(2), fill: '#cfd6e4', 'fill-opacity': '0.55', 'data-file': f.path, 'pointer-events': 'none' });
+            const t = mk('title', {}); t.textContent = f.path + ' · ' + (f.symbols || 0) + ' symbols'; dot.appendChild(t);
+            layer.appendChild(dot); n += 1;
+          });
+        });
+        box.dataset.files = String(n);
+        box.classList.toggle('partial', Boolean(data && data.partial));
+        if (note) note.textContent = data && data.ok === false ? '' : (n ? n + ' files' + (data && data.partial ? ' · symbols still being read' : '') : 'reading files…');
+      };
+      const drawOpen = (slug, data) => {
+        while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild);
+        const z = zoneAt[slug]; if (!z || !data || !data.ok) return;
+        const files = data.files || []; const R = Math.max(z.r * 4, W / 10);
+        const pos = {};
+        openLayer.appendChild(mk('circle', { cx: z.cx, cy: z.cy, r: R.toFixed(1), fill: '#0f1218', 'fill-opacity': '0.92', stroke: '#3794ff', 'stroke-width': '0.6' }));
+        const edges = mk('g', { class: 'medges' }); openLayer.appendChild(edges);
+        files.forEach((f, i) => {
+          const a = 2 * Math.PI * i / Math.max(1, files.length) - Math.PI / 2;
+          const fx = z.cx + Math.cos(a) * R * 0.62; const fy = z.cy + Math.sin(a) * R * 0.62;
+          const syms = f.symbols || [];
+          const fr = Math.min(R * 0.09, 1.2 + Math.sqrt(syms.length) * 0.6);
+          const g = mk('g', { class: 'mfile', 'data-file': f.path });
+          g.appendChild(mk('circle', { cx: fx.toFixed(1), cy: fy.toFixed(1), r: fr.toFixed(2), fill: '#2b3345', stroke: '#9aa3b2', 'stroke-width': '0.4' }));
+          const label = mk('text', { x: fx.toFixed(1), y: (fy + fr + 3).toFixed(1), 'text-anchor': 'middle', 'font-size': Math.max(2.2, R * 0.04).toFixed(1), fill: '#cfd6e4' });
+          label.textContent = String(f.path).split('/').pop(); g.appendChild(label);
+          const t = mk('title', {}); t.textContent = f.path + ' · ' + syms.length + ' symbols'; g.appendChild(t);
+          pos[f.id] = { x: fx, y: fy };
+          syms.forEach((sy, j) => {
+            const b = 2 * Math.PI * j / Math.max(1, syms.length) + hash(sy.id) * 0.5;
+            const sr = fr * 1.9; const sx = fx + Math.cos(b) * sr; const syy = fy + Math.sin(b) * sr;
+            pos[sy.id] = { x: sx, y: syy };
+            const d = mk('circle', { cx: sx.toFixed(1), cy: syy.toFixed(1), r: Math.max(0.5, fr * 0.22).toFixed(2), fill: '#7fd3b9', 'data-sym': sy.id, 'data-line': sy.line || '' });
+            const st = mk('title', {}); st.textContent = sy.label + ' · ' + f.path + (sy.line ? ':' + sy.line : ''); d.appendChild(st);
+            g.appendChild(d);
+          });
+          openLayer.appendChild(g);
+        });
+        (data.edges || []).forEach((e) => {
+          const a = pos[e.source]; const b = pos[e.target];
+          if (a && b) { edges.appendChild(mk('line', { x1: a.x.toFixed(1), y1: a.y.toFixed(1), x2: b.x.toFixed(1), y2: b.y.toFixed(1), stroke: e.relation === 'calls' ? '#7fd3b9' : '#3a4150', 'stroke-width': '0.25', 'stroke-opacity': '0.7' })); return; }
+          const known = a || b; const other = zoneAt[a ? e.zone_b : e.zone_a];
+          if (known && other) { const dx = other.cx - known.x; const dy = other.cy - known.y; const L = Math.hypot(dx, dy) || 1; edges.appendChild(mk('line', { x1: known.x.toFixed(1), y1: known.y.toFixed(1), x2: (known.x + dx / L * R * 0.5).toFixed(1), y2: (known.y + dy / L * R * 0.5).toFixed(1), stroke: '#c2811f', 'stroke-width': '0.25', 'stroke-dasharray': '1 1' })); }
+        });
+        const nSym = files.reduce((n, f) => n + (f.symbols || []).length, 0);
+        if (caption) caption.textContent = slug + ' · ' + files.length + ' files · ' + nSym + ' symbols · ' + (data.edges || []).length + ' edges' + (data.partial ? ' · still being read' : '');
+        const w = R * 2.3; const h = w * (H / W); vb = { x: z.cx - w / 2, y: z.cy - h / 2, w, h }; apply();
+      };
+      const ask = (zone) => vscode.postMessage({ cmd: 'graph', zone: zone || '' });
+      window.addEventListener('message', (ev) => {
+        const m = ev.data || {}; if (m.cmd !== 'graph') return;
+        if (!m.zone) { drawFiles(m.data); if (openZone) ask(openZone); return; }
+        if (m.zone === openZone) drawOpen(m.zone, m.data);
+      });
+      svg.addEventListener('click', (e) => {
+        const s = e.target.closest && e.target.closest('[data-sym]');
+        if (s) { const f = s.closest('[data-file]'); if (f) vscode.postMessage({ cmd: 'open-code', id: f.dataset.file + '#' + (s.dataset.line || 1) }); return; }
+        const g = e.target.closest && e.target.closest('[data-zone]');
+        if (!g) return;
+        openZone = g.dataset.zone; save(); ask(openZone);
+      });
+      const closeOpen = () => { openZone = ''; while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild); save(); };
+      box.querySelectorAll('[data-graph="reset"]').forEach((b) => b.addEventListener('click', closeOpen));
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openZone) { closeOpen(); reset(); } });
+      ask('');
     });
     document.querySelectorAll('[data-id]').forEach((btn) => {
       btn.onclick = () => vscode.postMessage({ cmd: 'surface', id: btn.dataset.id });

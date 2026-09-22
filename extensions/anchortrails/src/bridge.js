@@ -167,6 +167,19 @@ class BridgeClient {
     return data;
   }
 
+  // THE LEVEL BELOW THE ZONES. depth 1: every zone's files, one small call; depth 2
+  // with a zone: that zone's symbols and edges. Read zone by zone so the graph fills
+  // in as it is read rather than after one big payload.
+  async mapGraph({ repo, zone, depth } = {}) {
+    const q = new URLSearchParams();
+    if (repo) q.set('repo', repo);
+    if (zone) q.set('zone', zone);
+    q.set('depth', String(depth || (zone ? 2 : 1)));
+    const { r, data } = await this._json('GET', `/api/map/graph?${q.toString()}`);
+    if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
+    return data;
+  }
+
   async mapZone(slug) {
     const { r, data } = await this._json('GET', `/api/map/zones/${encodeURIComponent(slug)}`);
     if (!r.ok) return { ok: false, reason: (data && (data.detail || data.error)) || `bridge ${r.status}` };
