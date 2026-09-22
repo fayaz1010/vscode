@@ -879,6 +879,13 @@ async function handleTurn({
         out = client && typeof client.mapApply === 'function' ? await client.mapApply({ repo }) : { ok: false, reason: 'no bridge' };
       }
       response.markdown(mapActionMarkdown(kind, out));
+      // KEEP TALKING WHILE IT WORKS. A started job streams one line per event --
+      // stage, task phase, close/fail with cost, ship step -- until its flag goes
+      // down, so the person never has to open the panel to know what happened.
+      if (out && out.ok && !out.current && ['map', 'plan', 'run', 'ship'].includes(kind)) {
+        const { streamJob } = require('./job_stream');
+        await streamJob({ client, repo, kind, response, token });
+      }
       return { metadata: { slash: kind, session_id: sessionId } };
     }
     if (tag && !tag.rest) {

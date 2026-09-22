@@ -553,6 +553,39 @@ describe('handleTurn', () => {
   });
 });
 
+describe('a started job keeps talking in the chat', () => {
+  it('/run streams each event from the map view until the run ends, then returns', async () => {
+    // Live: "/run" printed "Run started ..." and the chat went quiet for 40 minutes.
+    const answers = [
+      { running: true, progress: { task: 't.a', attempt: 1, phase: 'asking the model' }, run: { status: 'running', results: [] } },
+      { running: false, run: { status: 'complete', closed: 1, cost_usd: 0.05, results: [{ task: 't.a', outcome: 'closed', attempts: 1, cost_usd: 0.05 }] } },
+    ];
+    let i = 0;
+    const client = {
+      async prepare() { return prepared(); },
+      async catalog() { return null; },
+      async mapApply() { return { ok: true, ships_after: true }; },
+      async map() { return answers[Math.min(i++, answers.length - 1)]; },
+    };
+    const jobStream = require('./job_stream');
+    const realPoll = jobStream.DEFAULT_POLL_MS;
+    process.env.AT_JOB_POLL_MS = '5';
+    const response = stream();
+    const t0 = Date.now();
+    const out = await handleTurn({
+      client, vscode: {}, request: { prompt: '', command: 'run' }, context: { history: [] }, response,
+      workspace: 'D:\\aozhen',
+    });
+    assert.equal(out.metadata.slash, 'run');
+    const text = response.parts.join('');
+    assert.match(text, /Run started/);
+    assert.match(text, /a · attempt 1 · asking the model/);
+    assert.match(text, /✓ a — closed after 1 attempt · \$0\.05/);
+    assert.match(text, /run complete: 1 closed · \$0\.05/);
+    assert.ok(Date.now() - t0 < realPoll * 3, 'the test must not wait a real poll interval per read');
+  });
+});
+
 describe('friendlyProgress', () => {
   it('never shows the raw internal instruction text a person is not meant to see', () => {
     // The exact bug: someone typed "launch claude desktop" and the chat's own

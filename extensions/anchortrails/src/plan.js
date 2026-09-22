@@ -242,6 +242,24 @@ function mapActions(map, esc) {
 // WHAT IS HAPPENING NOW. The runner's progress note (task · attempt · phase · for
 // how long) and the live job's last log lines, so a four-minute typecheck reads as
 // work in progress and not as a hang.
+// THE FILE UNDER THE PEN. The runner's progress names the task; the plan names the
+// task's write scope. Together: which file is being written right now. '' when
+// nothing is.
+function liveFile(map) {
+  const p = map && map.progress;
+  if (!p || !p.task) return '';
+  const busy = map.running || map.shipping;
+  if (!busy) return '';
+  const tasks = (map.plan && map.plan.tasks) || [];
+  const t = tasks.find((x) => x && x.id === p.task);
+  if (!t) return '';
+  const scope = t.execution && t.execution.write_scope;
+  if (Array.isArray(scope) && scope.length) return String(scope[0]).replace(/\\/g, '/');
+  const title = String(t.title || '');
+  const i = title.indexOf(':');
+  return i > 0 ? title.slice(0, i) : '';
+}
+
 function progressHtml(map, esc) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
   const p = map && map.progress;
@@ -249,8 +267,9 @@ function progressHtml(map, esc) {
   const busy = map && (map.running || map.mapping || map.planning || map.shipping);
   if (!p && !(tail && tail.alive)) return '';
   const now = Math.floor(Date.now() / 1000);
+  const file = liveFile(map);
   const line = p
-    ? `<p class="mnow">now: <b>${escape(String(p.task || '').replace(/^t\./, ''))}</b> · attempt ${Number(p.attempt || 0)} · ${escape(p.phase || '')}${p.model ? ` <span class="muted">[${escape(p.model)}]</span>` : ''}${p.since ? ` <span class="muted">· ${Math.max(0, now - Number(p.since))}s</span>` : ''}</p>`
+    ? `<p class="mnow">now: <b>${escape(String(p.task || '').replace(/^t\./, ''))}</b> · attempt ${Number(p.attempt || 0)} · ${escape(p.phase || '')}${p.model ? ` <span class="muted">[${escape(p.model)}]</span>` : ''}${p.since ? ` <span class="muted">· ${Math.max(0, now - Number(p.since))}s</span>` : ''}${file ? ` <span class="mpen" title="being written by the run">✎ <code>${escape(file)}</code></span>` : ''}</p>`
     : (busy ? `<p class="mnow">now: ${escape(tail.job)} job running</p>` : '');
   const log = tail && Array.isArray(tail.lines) && tail.lines.length
     ? `<details class="mlog"${busy ? ' open' : ''}><summary>${escape(tail.job)} log · last ${tail.lines.length} lines${tail.alive ? ' · live' : ''}</summary><pre>${escape(tail.lines.join('\n'))}</pre></details>`
@@ -400,7 +419,7 @@ function mapHtml(map, esc) {
     planned ? `${planned} planned task${planned === 1 ? '' : 's'}` : 'no plan yet',
     escape(stage),
   ].concat(read ? [escape(read)] : []).concat(summary ? [escape(summary)] : []).join(' · ')}</p>`;
-  const graph = graphSvg(map.overview, escape);
+  const graph = graphSvg(map.overview, escape, { live: liveFile(map) });
   const cleanRows = clean.map((z) => `<div class="mclean" id="z-${escape(z.slug || '')}"><span class="mdot" style="background:#3fb950"></span><b>${escape(z.zone)}</b><span class="muted"> · ${Number(z.files || 0)} files · nothing found</span></div>`).join('');
   const greyBlock = greyZonesHtml(grey, escape, { mapping: mapping || building });
   const body = zones.length || cleanRows || greyBlock
@@ -410,6 +429,8 @@ function mapHtml(map, esc) {
 }
 
 const MAP_CSS = `
+  .mpen { color:#3794ff; animation: mpen 1.2s ease-in-out infinite; }
+  @keyframes mpen { 50% { opacity:.35; } }
   .map .mrow { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; padding:4px 0;
     border-top:1px solid var(--vscode-widget-border,#333); font-size:11.5px; }
   .map .msev { font-weight:600; min-width:2.6em; }
@@ -595,6 +616,7 @@ function startPlan(client, vscode) {
 }
 
 module.exports = {
+  liveFile,
   runIndex,
   runMark,
   runSummary,

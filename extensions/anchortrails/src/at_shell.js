@@ -336,6 +336,7 @@ function shellHtml(data, tab, err) {
             const a = 2 * Math.PI * (i / Math.max(1, k)) + hash(f.path) * 0.9;
             const rr = z.r * (0.25 + 0.55 * hash(f.path + '#'));
             const dot = mk('circle', { cx: (z.cx + Math.cos(a) * rr).toFixed(1), cy: (z.cy + Math.sin(a) * rr).toFixed(1), r: Math.min(1.6, 0.35 + Math.sqrt(f.symbols || 0) * 0.22).toFixed(2), fill: '#cfd6e4', 'fill-opacity': '0.55', 'data-file': f.path, 'pointer-events': 'none' });
+            if (box.dataset.live && f.path === box.dataset.live) { dot.setAttribute('class', 'live'); dot.setAttribute('r', '2.4'); }
             const t = mk('title', {}); t.textContent = f.path + ' · ' + (f.symbols || 0) + ' symbols'; dot.appendChild(t);
             layer.appendChild(dot); n += 1;
           });

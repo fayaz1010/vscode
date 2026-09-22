@@ -91,6 +91,21 @@ function layoutZones(overview, iters = 420) {
   };
 }
 
+// The zone a file belongs to: the longest zone directory that prefixes its own.
+function zoneOfFile(file, zones) {
+  const f = String(file || '').replace(/\\/g, '/');
+  if (!f) return '';
+  const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+  let best = ''; let bestLen = -1;
+  for (const z of zones || []) {
+    const zd = (!z.zone || z.zone === '<root>') ? '' : String(z.zone);
+    if ((zd === '' && dir === '') || dir === zd || dir.startsWith(`${zd}/`)) {
+      if (zd.length > bestLen) { best = z.slug || ''; bestLen = zd.length; }
+    }
+  }
+  return best;
+}
+
 function graphSvg(overview, esc, opts = {}) {
   const escape = typeof esc === 'function' ? esc : (v) => String(v ?? '');
   const zones = (overview && overview.zones) || [];
@@ -112,6 +127,8 @@ function graphSvg(overview, esc, opts = {}) {
   nodes.filter((n) => n.zone.analysed === false).sort((a, b) => (b.zone.files || 0) - (a.zone.files || 0)).slice(0, opts.greyLabels == null ? 8 : opts.greyLabels)
     .forEach((n) => labelled.add(n.zone.zone));
   const edgeHtml = edges.map((e) => `<line x1="${X(nodes[e.a].x)}" y1="${Y(nodes[e.a].y)}" x2="${X(nodes[e.b].x)}" y2="${Y(nodes[e.b].y)}" stroke="#3a4150" stroke-width="${e.width.toFixed(2)}"/>`).join('');
+  const live = String(opts.live || '');
+  const liveZone = live ? zoneOfFile(live, zones) : '';
   const nodeHtml = nodes.map((n) => {
     const z = n.zone;
     const what = z.analysed === false
@@ -120,7 +137,7 @@ function graphSvg(overview, esc, opts = {}) {
     const label = labelled.has(z.zone)
       ? `<text x="${X(n.x)}" y="${(Number(Y(n.y)) + n.r + 10).toFixed(1)}" text-anchor="middle" font-size="9" fill="${z.analysed === false ? '#6b7484' : '#9aa3b2'}">${escape(String(z.zone).split('/').slice(-2).join('/'))}</text>`
       : '';
-    return `<g class="mnode${z.analysed === false ? ' grey' : ''}" data-zone="${escape(z.slug || '')}"><title>${escape(what)}</title>`
+    return `<g class="mnode${z.analysed === false ? ' grey' : ''}${liveZone && z.slug === liveZone ? ' live' : ''}" data-zone="${escape(z.slug || '')}"><title>${escape(what)}${liveZone && z.slug === liveZone ? ` · writing ${escape(live)}` : ''}</title>`
       + `<circle cx="${X(n.x)}" cy="${Y(n.y)}" r="${n.r.toFixed(1)}" fill="${n.fill}" stroke="#0f1218" stroke-width="0.8"/>${label}</g>`;
   }).join('');
   const legend = '<div class="mlegend"><i style="background:#4a5160"></i>not analysed <i style="background:#2f6b3a"></i>nothing found <i style="background:#8a7b28"></i>moderate <i style="background:#c2811f"></i>high <i style="background:#e2533f"></i>worst · size = flagged symbols · lines = calls and imports between zones</div>';
@@ -128,7 +145,7 @@ function graphSvg(overview, esc, opts = {}) {
   // view, and the caption that names the node the view is zoomed on. Wheel zooms,
   // drag pans, a click zooms to the node -- all on the viewBox, no library.
   const tools = '<div class="mtools"><button type="button" data-graph="full" title="Full screen (Esc closes)">⤢ Full screen</button><button type="button" data-graph="reset" title="Fit the whole map">⟲ Fit</button><span class="mcaption"></span><span class="mload"></span></div>';
-  return `<div class="mgraph" data-w="${W}" data-h="${H}">${tools}<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
+  return `<div class="mgraph" data-w="${W}" data-h="${H}"${live ? ` data-live="${escape(live)}"` : ''}>${tools}<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="zone map">${edgeHtml}${nodeHtml}</svg>${opts.legend === false ? '' : legend}</div>`;
 }
 
 const GRAPH_CSS = `
@@ -149,9 +166,12 @@ const GRAPH_CSS = `
   .mgraph.full .mtools { font-size:12px; } .mgraph.full .mtools button { font-size:12px; padding:4px 10px; }
   .mgraph.full .mlegend { font-size:11.5px; }
   .mgraph .mnode { cursor:pointer; } .mgraph .mnode:hover circle { stroke:#fff; stroke-width:1.4; }
+  .mgraph .mnode.live > circle { stroke:#3794ff; stroke-width:1.8; animation: mpulse 1.4s ease-in-out infinite; }
+  .mgraph .mfiles circle.live { fill:#3794ff; fill-opacity:1; animation: mpulse 1s ease-in-out infinite; }
+  @keyframes mpulse { 50% { stroke-opacity:.15; fill-opacity:.35; } }
   .mgraph .mlegend { font-size:10.5px; opacity:.7; padding:4px 4px 2px; }
   .mgraph .mlegend i { display:inline-block; width:9px; height:9px; border-radius:50%; margin:0 3px 0 8px; vertical-align:middle; }
   .mgraph .mlegend i:first-child { margin-left:0; }
 `;
 
-module.exports = { layoutZones, graphSvg, ramp, radius, GRAPH_CSS };
+module.exports = { layoutZones, graphSvg, zoneOfFile, ramp, radius, GRAPH_CSS };

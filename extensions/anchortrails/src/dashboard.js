@@ -11,7 +11,7 @@
  *
  * Absent is a state: a folder with no map yet shows the buttons that make one.
  */
-const { runIndex, runMark, mapActions, shipLine, progressHtml } = require('./plan');
+const { runIndex, runMark, mapActions, shipLine, progressHtml, liveFile } = require('./plan');
 const { graphSvg } = require('./map_graph');
 
 // "symbol (marker, line N)" -- the planner's deliverable line. The line is what makes
@@ -239,9 +239,13 @@ function dashboardHtml(map, esc, focusTask) {
     const said = r
       ? [st.label, who, st.why].filter(Boolean).join(' · ')
       : (map.running ? 'waiting' : 'not run');
-    const cls = `dtask${st.mark ? ` m-${(r && r.outcome) || ''}` : ''}${focusTask && focusTask === t.id ? ' on' : ''}`;
-    return `<div class="${cls}" data-task="${escape(t.id)}">
-      <div class="dhead"><span class="dmark">${escape(st.mark || '·')}</span> <b>${escape(String(t.id).replace(/^t\./, ''))}</b><span class="muted"> · ${escape(headline)}</span></div>
+    // UNDER THE PEN. The row of the task the runner is on right now pulses and
+    // says so, with the file: a person watching the Dashboard sees which file is
+    // being written without reading the log.
+    const live = Boolean((map.running || map.shipping) && map.progress && map.progress.task === t.id);
+    const cls = `dtask${st.mark ? ` m-${(r && r.outcome) || ''}` : ''}${focusTask && focusTask === t.id ? ' on' : ''}${live ? ' live' : ''}`;
+    return `<div class="${cls}" data-task="${escape(t.id)}"${live && path ? ` data-live-file="${escape(path)}"` : ''}>
+      <div class="dhead"><span class="dmark">${escape(live ? '✎' : (st.mark || '·'))}</span> <b>${escape(String(t.id).replace(/^t\./, ''))}</b><span class="muted"> · ${escape(headline)}</span>${live ? `<span class="dpen"> · writing ${escape(path || '')}${map.progress.phase ? ` · ${escape(map.progress.phase)}` : ''}</span>` : ''}</div>
       ${ds}
       <div class="meta">${escape(said)}${actual && budget ? ` <span class="dbudget">(est. up to ${escape(budget)})</span>` : ''}</div>
     </div>`;
@@ -257,7 +261,7 @@ function dashboardHtml(map, esc, focusTask) {
     ${shipLine(map, escape)}
     ${progressHtml(map, escape)}
     ${actions}
-    ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4 })}
+    ${graphSvg(map.overview, escape, { height: 220, greyLabels: 4, live: liveFile(map) })}
     ${tiles}
     ${modelTable}
     ${progress}
@@ -268,6 +272,9 @@ function dashboardHtml(map, esc, focusTask) {
 }
 
 const DASH_CSS = `
+  .dtask.live { border-color:#3794ff; animation: dpulse 1.4s ease-in-out infinite; }
+  .dtask.live .dmark, .dpen { color:#3794ff; }
+  @keyframes dpulse { 50% { box-shadow: 0 0 0 3px rgba(55,148,255,.25); } }
   .dash .chips { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 8px; }
   .dash .chip { font-size:11px; padding:2px 8px; border-radius:9px; background:#55555555; }
   .dash .chip.ok { background:#2d6a5a66; color:#9ff0cf; }

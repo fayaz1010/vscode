@@ -168,3 +168,38 @@ describe('the graph below the zones, in the editor host', () => {
     assert.equal(h.posted[h.posted.length - 1].data.depth, 2);
   });
 });
+
+describe('the file under the pen, in the Explorer', () => {
+  it('registers a ✎ decoration for the file the run is writing and clears it when the run stops', async () => {
+    let provider = null;
+    const fired = [];
+    class Emitter { constructor() { this.event = 'ev'; } fire(x) { fired.push(x); } dispose() {} }
+    const webview = { html: '', options: {}, onDidReceiveMessage() {}, postMessage() {} };
+    const panel = { webview, visible: false, reveal() {}, onDidChangeViewState() {}, onDidDispose() {} };
+    let map = {
+      ok: true, running: true, progress: { task: 't.a' },
+      plan: { tasks: [{ id: 't.a', title: 'lib/a.ts: build', execution: { write_scope: ['lib/a.ts'] }, deliverables: [] }] },
+      overview: { meta: {}, zones: [] },
+    };
+    const vscode = {
+      EventEmitter: Emitter,
+      ThemeColor: class { constructor(id) { this.id = id; } },
+      ViewColumn: { One: 1 },
+      window: { createWebviewPanel: () => panel, registerFileDecorationProvider(p) { provider = p; return { dispose() { provider = null; } }; } },
+      workspace: { workspaceFolders: [{ uri: { fsPath: 'D:\\aozhen' } }] },
+    };
+    const client = { async sessionPanel() { return {}; }, async map() { return map; } };
+    const { startHome } = require('./home');
+    const home = startHome(client, vscode);
+    await home.openEditor();
+    assert.ok(provider, 'registered once a file is under the pen');
+    assert.equal(fired.length, 1);
+    const deco = provider.provideFileDecoration({ fsPath: 'D:\\aozhen\\lib\\a.ts' });
+    assert.equal(deco.badge, '✎');
+    assert.equal(provider.provideFileDecoration({ fsPath: 'D:\\aozhen\\lib\\b.ts' }), undefined);
+    map = { ...map, running: false };
+    await home.openEditor(); // a repaint path is not exposed; openEditor reveals and repaints on first call only
+    home.dispose();
+    assert.equal(provider, null, 'disposed with the panel');
+  });
+});

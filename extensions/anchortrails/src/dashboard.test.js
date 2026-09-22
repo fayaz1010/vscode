@@ -189,3 +189,44 @@ describe('Who was paid', () => {
     assert.doesNotMatch(dashboardHtml(MAP, esc), /all runs/);
   });
 });
+
+describe('the file under the pen', () => {
+  const { liveFile } = require('./plan');
+  const { zoneOfFile, graphSvg } = require('./map_graph');
+  const { dashboardHtml } = require('./dashboard');
+  const map = {
+    ok: true, running: true,
+    progress: { task: 't.lib-admin-payments.ts', attempt: 1, phase: 'asking the model' },
+    plan: { tasks: [
+      { id: 't.lib-admin-payments.ts', title: 'lib/admin/payments.ts: build', execution: { write_scope: ['lib/admin/payments.ts'] }, deliverables: [] },
+      { id: 't.other', title: 'lib/x.ts: wire', execution: { write_scope: ['lib/x.ts'] }, deliverables: [] },
+    ] },
+    overview: { meta: {}, zones: [{ zone: '<root>', slug: 'root', files: 2 }, { zone: 'lib', slug: 'lib', files: 3 }, { zone: 'lib/admin', slug: 'lib-admin', files: 2 }], zone_edges: [] },
+    run: { status: 'running', results: [] },
+  };
+
+  it('liveFile is the running task\'s write scope, and nothing when nothing runs', () => {
+    assert.equal(liveFile(map), 'lib/admin/payments.ts');
+    assert.equal(liveFile({ ...map, running: false, shipping: false }), '');
+    assert.equal(liveFile({ ...map, progress: { task: 't.nope' } }), '');
+  });
+
+  it('the running task\'s row pulses and names the file; the others do not', () => {
+    const html = dashboardHtml(map, (v) => String(v ?? ''));
+    assert.match(html, /class="dtask live" data-task="t\.lib-admin-payments\.ts" data-live-file="lib\/admin\/payments\.ts"/);
+    assert.match(html, /✎/);
+    assert.match(html, /writing lib\/admin\/payments\.ts · asking the model/);
+    assert.ok(!/data-task="t\.other"[^>]*live/.test(html));
+  });
+
+  it('the graph marks the zone that owns the file, and carries the file for the dots', () => {
+    assert.equal(zoneOfFile('lib/admin/payments.ts', map.overview.zones), 'lib-admin', 'the deepest zone, not lib');
+    assert.equal(zoneOfFile('lib/x.ts', map.overview.zones), 'lib');
+    assert.equal(zoneOfFile('middleware.ts', map.overview.zones), 'root');
+    const svg = graphSvg(map.overview, (v) => String(v ?? ''), { live: 'lib/admin/payments.ts' });
+    assert.match(svg, /data-live="lib\/admin\/payments\.ts"/);
+    assert.match(svg, /class="mnode live" data-zone="lib-admin"/);
+    assert.ok(!/class="mnode live" data-zone="lib"/.test(svg));
+    assert.match(svg, /· writing lib\/admin\/payments\.ts<\/title>/);
+  });
+});

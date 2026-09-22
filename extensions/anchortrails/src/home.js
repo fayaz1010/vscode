@@ -29,6 +29,7 @@ function esc(value) {
 const { sessionId, folderPath } = require('./workspace');
 const { stepListHtml, STEP_CSS, gatePlan } = require('./plan');
 const { shellHtml } = require('./at_shell');
+const { liveFile } = require('./plan');
 const { seedFrom } = require('./chat_seed');
 const { openChat } = require('./drive');
 
@@ -176,6 +177,31 @@ function startHome(client, vscode, extras = {}) {
   // THE GRAPH BELOW THE ZONES, cached per map head. Partial answers (files known,
   // symbols not yet) are never cached: the next ask must see graphify land.
   const graphCache = { head: null, files: null, zones: {} };
+  // THE FILE UNDER THE PEN, in the Explorer too: a ✎ badge on the file the runner
+  // is writing, so a person looking at the tree sees the activity where it is.
+  const pen = { file: '', root: '' };
+  const penEmitter = vscode.EventEmitter ? new vscode.EventEmitter() : null;
+  const penProvider = {
+    onDidChangeFileDecorations: penEmitter ? penEmitter.event : undefined,
+    provideFileDecoration(uri) {
+      if (!pen.file || !uri || !uri.fsPath) return undefined;
+      const fs = String(uri.fsPath).replace(/\\/g, '/').toLowerCase();
+      const want = pen.file.replace(/\\/g, '/').toLowerCase();
+      if (fs !== want && !fs.endsWith(`/${want}`)) return undefined;
+      const color = vscode.ThemeColor ? new vscode.ThemeColor('charts.blue') : undefined;
+      return { badge: '✎', tooltip: 'AnchorTrails is writing this file', color, propagate: false };
+    },
+  };
+  let penRegistration = null;
+  function updatePen(map) {
+    const file = liveFile(map);
+    if (file === pen.file) return;
+    pen.file = file;
+    if (!penRegistration && vscode.window && typeof vscode.window.registerFileDecorationProvider === 'function') {
+      try { penRegistration = vscode.window.registerFileDecorationProvider(penProvider); } catch { penRegistration = null; }
+    }
+    if (penEmitter && typeof penEmitter.fire === 'function') penEmitter.fire(undefined);
+  }
 
   function graphHead(map) {
     return (map && map.currency && map.currency.map_head) || (map && map.overview && map.overview.meta && map.overview.meta.head) || '';
@@ -360,6 +386,7 @@ function startHome(client, vscode, extras = {}) {
         try { map = await client.map({ repo: folderPath(vscode) || '' }); } catch (err) { map = { ok: false, reason: String((err && err.message) || err) }; }
       }
       lastMap = map;
+      updatePen(map);
       retries = 0;
       const next = {
         ...data,
@@ -457,6 +484,8 @@ function startHome(client, vscode, extras = {}) {
     },
     openEditor,
     dispose() {
+      if (penRegistration && typeof penRegistration.dispose === 'function') { try { penRegistration.dispose(); } catch { /* host */ } penRegistration = null; }
+      if (penEmitter && typeof penEmitter.dispose === 'function') penEmitter.dispose();
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (sub && typeof sub.dispose === 'function') sub.dispose();
       if (editor && typeof editor.dispose === 'function') editor.dispose();
