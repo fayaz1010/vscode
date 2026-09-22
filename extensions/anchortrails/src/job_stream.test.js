@@ -253,3 +253,37 @@ describe('the step between finishing and shipping', () => {
     assert.ok(!response.parts.join('\n').includes('assessment'), 'not announced as if it just happened');
   });
 });
+
+describe('what it understood, and what it decided', () => {
+  const detail = {
+    goal: 'Let a shopper pay with WeChat Pay at checkout',
+    done_when: ['a shopper can complete an order end to end with WeChat'],
+    questions: [{ id: 'q1', ask: 'Sandbox or live credentials first?', recommend: 'sandbox first',
+                  because: 'the repo has no WeChat keys in .env.example', assume: 'sandbox' }],
+  };
+
+  it('says it back before any task exists, with the answers it took', async () => {
+    const answers = [
+      { planning: true },
+      { planning: true, objective_detail: detail },
+      { planning: false, objective_detail: detail, plan: { tasks: [{ id: 't.a' }, { id: 't.b' }] } },
+    ];
+    let i = 0;
+    const client = { async map() { return answers[Math.min(i++, answers.length - 1)]; } };
+    const response = stream();
+    await streamJob({ client, repo: 'x', kind: 'plan', response, sleep: async () => {} });
+    const text = response.parts.join('\n');
+    assert.match(text, /reading it as: Let a shopper pay with WeChat Pay at checkout/);
+    assert.match(text, /done when a shopper can complete an order/);
+    assert.match(text, /Sandbox or live credentials first\? → sandbox first \(the repo has no WeChat keys/);
+    assert.match(text, /those are my answers for now; say otherwise and I will plan again/);
+    assert.match(text, /plan: 2 tasks/);
+  });
+
+  it('a structure already on disk when we attach is not announced again', async () => {
+    const client = { async map() { return { running: false, objective_detail: detail, run: { status: 'complete', results: [] } }; } };
+    const response = stream();
+    await streamJob({ client, repo: 'x', kind: 'run', response, attach: true, sleep: async () => {} });
+    assert.ok(!response.parts.join('\n').includes('reading it as'));
+  });
+});

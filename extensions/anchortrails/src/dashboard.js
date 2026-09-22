@@ -149,7 +149,18 @@ function dashboardHtml(map, esc, focusTask) {
   if (map.shipping) chips.push('<span class="chip busy">shipping…</span>');
   else if (map.ship && map.ship.status) chips.push(`<span class="chip${map.ship.status === 'shipped' ? ' ok' : ' warn'}">${escape(map.ship.status)}${map.ship.deploy && map.ship.deploy.url ? ' · ' + (map.ship.deploy.prod ? 'prod' : 'preview') : ''}</span>`);
 
-  const objectiveLine = objective
+  // WHAT THEY ASKED, AS IT WAS UNDERSTOOD. Their own sentence, the goal it was
+  // read as, and the decisions it left open with the answer taken for now --
+  // so a person can see what was decided for them and say otherwise.
+  const detail = map.objective_detail || null;
+  const questions = (detail && detail.questions) || [];
+  const objectiveLine = detail && detail.goal
+    ? `<div class="dobjective"><span class="muted">objective</span> ${escape(detail.goal)}
+        ${map.asked && map.asked !== detail.goal ? `<div class="dasked">you asked: ${escape(map.asked)}</div>` : ''}
+        ${(detail.done_when || []).length ? `<div class="ddone">done when ${escape((detail.done_when || []).join('; '))}</div>` : ''}
+        ${questions.length ? `<details class="dqs"><summary>${questions.length} decision${questions.length === 1 ? '' : 's'} your sentence left open — answered for now</summary>${questions.map((q) => `<div class="dq"><b>${escape(q.ask)}</b> → ${escape(q.recommend || q.assume || '')}${q.because ? `<span class="muted"> — ${escape(q.because)}</span>` : ''}</div>`).join('')}</details>` : ''}
+      </div>`
+    : objective
     ? `<p class="dobjective"><span class="muted">objective</span> ${escape(objective)}</p>`
     : '<p class="dobjective muted">no objective yet — the plan comes from one: Plan…, or <code>/map plan &lt;objective&gt;</code> in @at</p>';
 
@@ -299,6 +310,9 @@ function dashboardHtml(map, esc, focusTask) {
 }
 
 const DASH_CSS = `
+  .dasked, .ddone { opacity:.7; margin-top:3px; }
+  .dqs { margin-top:5px; } .dqs > summary { cursor:pointer; opacity:.8; }
+  .dq { padding:3px 0 3px 10px; border-left:2px solid #2b3345; margin-top:4px; }
   .dzone { margin:4px 0 8px; } .dzone > summary { cursor:pointer; font-weight:600; padding:3px 0; }
   .dplanning { color:#c2811f; animation: dpulse2 1.2s ease-in-out infinite; margin:2px 0 6px; }
   @keyframes dpulse2 { 50% { opacity:.4; } }

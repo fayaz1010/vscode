@@ -278,3 +278,33 @@ describe('the dashboard says whether the work is ready', () => {
     assert.ok(!/chip[^>]*>(ready|more work)</.test(dashboardHtml(base, esc)), 'no verdict, no chip');
   });
 });
+
+describe('the objective, as it was understood', () => {
+  const { dashboardHtml } = require('./dashboard');
+  const esc = (v) => String(v ?? '');
+  const base = { ok: true, overview: { meta: {}, zones: [], zone_edges: [] }, plan: { tasks: [] } };
+
+  it('shows their words, the goal it was read as, and the decisions taken for them', () => {
+    const html = dashboardHtml({
+      ...base,
+      asked: 'let people pay with wechat',
+      objective: 'Let a shopper pay with WeChat Pay at checkout. It is done when: …',
+      objective_detail: {
+        goal: 'Let a shopper pay with WeChat Pay at checkout',
+        done_when: ['a shopper can complete an order end to end'],
+        questions: [{ ask: 'Sandbox or live first?', recommend: 'sandbox first', because: 'no WeChat keys in .env.example' }],
+      },
+    }, esc);
+    assert.match(html, /<span class="muted">objective<\/span> Let a shopper pay with WeChat Pay at checkout/);
+    assert.match(html, /you asked: let people pay with wechat/);
+    assert.match(html, /done when a shopper can complete an order end to end/);
+    assert.match(html, /1 decision your sentence left open — answered for now/);
+    assert.match(html, /<b>Sandbox or live first\?<\/b> → sandbox first/);
+    assert.match(html, /no WeChat keys in \.env\.example/);
+  });
+
+  it('a plain objective with no structure still shows as it always did', () => {
+    const html = dashboardHtml({ ...base, objective: 'fix the endpoint mismatches' }, esc);
+    assert.match(html, /<p class="dobjective"><span class="muted">objective<\/span> fix the endpoint mismatches<\/p>/);
+  });
+});

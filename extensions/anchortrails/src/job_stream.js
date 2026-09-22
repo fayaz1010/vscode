@@ -34,6 +34,20 @@ function diffEvents(prev, next, kind) {
     if (nm.files_analysed != null && nm.files_analysed !== pm.files_analysed) out.push(`- ${Number(nm.files_analysed).toLocaleString()}${nm.files_total_repo ? ` of ${Number(nm.files_total_repo).toLocaleString()}` : ''} files read`);
     if (nm.status === 'complete' && pm.status !== 'complete') out.push(`- map complete: ${Number(nm.findings_actionable || 0)} actionable of ${Number(nm.findings_total || 0)} findings`);
   }
+  // WHAT IT UNDERSTOOD, AND WHAT IT HAD TO DECIDE. A person types an idea; the
+  // structure it becomes -- and the questions that idea left open -- is the
+  // first thing worth saying back, before any task exists.
+  const pd = p.objective_detail || {}; const nd = n.objective_detail || {};
+  if (nd.goal && nd.goal !== pd.goal) {
+    out.push(`- reading it as: ${nd.goal}`);
+    for (const d of (nd.done_when || []).slice(0, 3)) out.push(`  - done when ${d}`);
+    for (const q of nd.questions || []) {
+      out.push(`  - ${q.ask} → ${q.recommend || q.assume}${q.because ? ` (${q.because})` : ''}`);
+    }
+    if ((nd.questions || []).length) {
+      out.push('  - those are my answers for now; say otherwise and I will plan again');
+    }
+  }
   if (kind === 'plan' || kind === 'run') {
     const pt = ((p.plan || {}).tasks || []).length; const nt = ((n.plan || {}).tasks || []).length;
     if (n.plan && (!p.plan || nt !== pt)) out.push(`- plan: ${nt} task${nt === 1 ? '' : 's'}${(n.plan.tasks || []).slice(0, 3).map((t) => ` · ${shortTask(t.id)}`).join('')}${nt > 3 ? ' · …' : ''}`);
@@ -143,8 +157,8 @@ async function streamJob({ client, repo, kind, response, token, attach = false, 
         // Attaching to someone else's job: the plan it is working from was
         // already there too, so it is history like the results. A job we
         // started ourselves may still be building its plan -- that is news.
-        prev = attach ? { run: map.run, ship: map.ship, plan: map.plan, assessment: map.assessment }
-          : { run: map.run, ship: map.ship, assessment: map.assessment };
+        prev = attach ? { run: map.run, ship: map.ship, plan: map.plan, assessment: map.assessment, objective_detail: map.objective_detail }
+          : { run: map.run, ship: map.ship, assessment: map.assessment, objective_detail: map.objective_detail };
       }
       const events = diffEvents(prev, map, kind);
       for (const line of events) { response.markdown(`\n${line}`); lines += 1; }
