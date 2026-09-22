@@ -127,9 +127,47 @@ describe('the graph loads like a stream', () => {
     assert.match(html, /cmd: 'graph', zone: zone \|\| ''/, 'asks the extension, never the bridge');
     assert.match(html, /ask\(''\);/, 'depth 1 for every zone as soon as the zones are drawn');
     assert.match(html, /drawFiles\(m\.data\)/);
-    assert.match(html, /openZone = g\.dataset\.zone; save\(\); ask\(openZone\)/, 'a click opens the zone');
+    assert.match(html, /clickZone\(g\)/, 'a click frames the zone, and framing it opens it');
+    assert.match(html, /if \(want === openZone\) return;/, 'the view decides what is open, so a click and a wheel agree');
     assert.match(html, /vscode\.setState\(\{ \.\.\.saved, openZone \}\)/, 'survives the five-second repaint');
     assert.match(html, /class="mload"/, 'a place to say how much has been read');
     assert.match(html, /symbols still being read/, 'partial answers are named as such');
+  });
+});
+
+describe('the map is navigated by zoom', () => {
+  const { shellHtml } = require('./at_shell');
+  const html = () => shellHtml({ map: { ok: true, overview: { meta: {}, zones: [{ zone: 'lib', slug: 'lib', files: 3 }, { zone: 'lib/admin', slug: 'lib-admin', files: 2 }], zone_edges: [] } } }, 'map');
+
+  it('zooming into a node steps inside it, and zooming out leaves it', () => {
+    const h = html();
+    assert.match(h, /share\(zoneAt\[near\]\) > 0\.30/, 'far enough in on a node and the view enters it');
+    assert.match(h, /share\(zoneAt\[openZone\]\) < 0\.18/, 'and leaves when it no longer fills the view');
+    assert.match(h, /onView = \(\) => \{ rescale\(\); step\(\); \}/, 'every view change is judged, wheel or click');
+  });
+
+  it('a click frames the node -- it does not zoom twice and land somewhere else', () => {
+    const h = html();
+    assert.match(h, /clickZone = \(g\) => \{/);
+    assert.match(h, /vb = \{ x: z\.cx - w \/ 2, y: z\.cy - h \/ 2, w, h \};\n        apply\(\);/);
+    assert.ok(!/const w = W \/ 4; const h = H \/ 4;/.test(h), 'the old competing zoom-to-quarter is gone');
+  });
+
+  it('labels hold their size on screen at every zoom', () => {
+    const h = html();
+    assert.match(h, /text\[data-fs\]/, 'every label carries its base size');
+    assert.match(h, /Number\(t\.dataset\.fs \|\| 9\) \* k/, 'and is scaled by the view factor');
+    const { graphSvg } = require('./map_graph');
+    const svg = graphSvg({ meta: {}, zones: [{ zone: 'lib', slug: 'lib', files: 3, findings_total: 1, colour: 0.4 }], zone_edges: [] }, (v) => String(v ?? ''), { tasksByZone: { lib: 2 } });
+    assert.match(svg, /font-size="9" data-fs="9"/, 'zone labels');
+    assert.match(svg, /font-size="5\.5" data-fs="5\.5"/, 'and the task badge');
+    assert.match(svg, /vector-effect="non-scaling-stroke"/, 'outlines keep their weight too');
+  });
+
+  it('the interior is drawn inside the node, not over the map', () => {
+    const h = html();
+    assert.match(h, /const R = z\.r;/, "the zone's own radius bounds its contents");
+    assert.match(h, /layer\.setAttribute\('opacity', '0\.12'\)/, 'the scattered dots step back');
+    assert.ok(!/fill: '#0f1218', 'fill-opacity': '0\.92'/.test(h), 'no opaque overlay circle any more');
   });
 });

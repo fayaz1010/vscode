@@ -126,7 +126,7 @@ function graphSvg(overview, esc, opts = {}) {
   const labelled = new Set(nodes.filter((n) => n.zone.analysed !== false).map((n) => n.zone.zone));
   nodes.filter((n) => n.zone.analysed === false).sort((a, b) => (b.zone.files || 0) - (a.zone.files || 0)).slice(0, opts.greyLabels == null ? 8 : opts.greyLabels)
     .forEach((n) => labelled.add(n.zone.zone));
-  const edgeHtml = edges.map((e) => `<line x1="${X(nodes[e.a].x)}" y1="${Y(nodes[e.a].y)}" x2="${X(nodes[e.b].x)}" y2="${Y(nodes[e.b].y)}" stroke="#3a4150" stroke-width="${e.width.toFixed(2)}"/>`).join('');
+  const edgeHtml = edges.map((e) => `<line x1="${X(nodes[e.a].x)}" y1="${Y(nodes[e.a].y)}" x2="${X(nodes[e.b].x)}" y2="${Y(nodes[e.b].y)}" stroke="#3a4150" stroke-width="${e.width.toFixed(2)}" vector-effect="non-scaling-stroke"/>`).join('');
   const live = String(opts.live || '');
   const liveZone = live ? zoneOfFile(live, zones) : '';
   // THE PLAN ON THE MAP: how many tasks each zone holds, as a small count on the node.
@@ -135,7 +135,7 @@ function graphSvg(overview, esc, opts = {}) {
     const k = Number(tasksByZone[slug] || 0);
     if (!k) return '';
     const bx = Number(X(n.x)) + n.r * 0.75; const by = Number(Y(n.y)) - n.r * 0.75;
-    return `<g class="mbadge"><title>${k} task${k === 1 ? '' : 's'} planned here</title><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="4.2" fill="#3794ff" stroke="#0f1218" stroke-width="0.6"/><text x="${bx.toFixed(1)}" y="${(by + 2.1).toFixed(1)}" text-anchor="middle" font-size="5.5" fill="#fff">${k}</text></g>`;
+    return `<g class="mbadge"><title>${k} task${k === 1 ? '' : 's'} planned here</title><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="4.2" fill="#3794ff" stroke="#0f1218" stroke-width="0.6"/><text x="${bx.toFixed(1)}" y="${(by + 2.1).toFixed(1)}" text-anchor="middle" font-size="5.5" data-fs="5.5" fill="#fff">${k}</text></g>`;
   };
   const nodeHtml = nodes.map((n) => {
     const z = n.zone;
@@ -143,10 +143,10 @@ function graphSvg(overview, esc, opts = {}) {
       ? `${z.zone} · ${Number(z.files || 0)} files · not analysed${z.queued ? ' (queued)' : ''}`
       : `${z.zone} · ${Number(z.files || 0)} files · ${Number(z.findings_total || 0)} findings · ${Number(z.size || 0)} flagged · worst ${Number(z.colour || 0).toFixed(2)}`;
     const label = labelled.has(z.zone)
-      ? `<text x="${X(n.x)}" y="${(Number(Y(n.y)) + n.r + 10).toFixed(1)}" text-anchor="middle" font-size="9" fill="${z.analysed === false ? '#6b7484' : '#9aa3b2'}">${escape(String(z.zone).split('/').slice(-2).join('/'))}</text>`
+      ? `<text x="${X(n.x)}" y="${(Number(Y(n.y)) + n.r + 10).toFixed(1)}" text-anchor="middle" font-size="9" data-fs="9" fill="${z.analysed === false ? '#6b7484' : '#9aa3b2'}">${escape(String(z.zone).split('/').slice(-2).join('/'))}</text>`
       : '';
     return `<g class="mnode${z.analysed === false ? ' grey' : ''}${liveZone && z.slug === liveZone ? ' live' : ''}" data-zone="${escape(z.slug || '')}"><title>${escape(what)}${liveZone && z.slug === liveZone ? ` · writing ${escape(live)}` : ''}</title>`
-      + `<circle cx="${X(n.x)}" cy="${Y(n.y)}" r="${n.r.toFixed(1)}" fill="${n.fill}" stroke="#0f1218" stroke-width="0.8"/>${label}${badge(z.slug, n)}</g>`;
+      + `<circle cx="${X(n.x)}" cy="${Y(n.y)}" r="${n.r.toFixed(1)}" fill="${n.fill}" stroke="#0f1218" stroke-width="0.8" vector-effect="non-scaling-stroke"/>${label}${badge(z.slug, n)}</g>`;
   }).join('');
   const legend = '<div class="mlegend"><i style="background:#4a5160"></i>not analysed <i style="background:#2f6b3a"></i>nothing found <i style="background:#8a7b28"></i>moderate <i style="background:#c2811f"></i>high <i style="background:#e2533f"></i>worst · size = flagged symbols · lines = calls and imports between zones</div>';
   // The controls are wired by the shell's script: full screen (Esc closes), reset the
@@ -174,6 +174,10 @@ const GRAPH_CSS = `
   .mgraph.full .mtools { font-size:12px; } .mgraph.full .mtools button { font-size:12px; padding:4px 10px; }
   .mgraph.full .mlegend { font-size:11.5px; }
   .mgraph .mnode { cursor:pointer; } .mgraph .mnode:hover circle { stroke:#fff; stroke-width:1.4; }
+  /* the zone you are inside: its circle steps back so its contents read */
+  .mgraph .mnode.open > circle { fill-opacity:.18; stroke:#3794ff; stroke-width:1.4; }
+  .mgraph .mnode.open > text { fill:#3794ff; }
+  .mgraph .mfile circle { cursor:pointer; }
   .mgraph .mnode.live > circle { stroke:#3794ff; stroke-width:1.8; animation: mpulse 1.4s ease-in-out infinite; }
   .mgraph .mfiles circle.live { fill:#3794ff; fill-opacity:1; animation: mpulse 1s ease-in-out infinite; }
   @keyframes mpulse { 50% { stroke-opacity:.15; fill-opacity:.35; } }

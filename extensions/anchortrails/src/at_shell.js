@@ -243,7 +243,11 @@ function shellHtml(data, tab, err) {
       const W = Number(box.dataset.w) || 560; const H = Number(box.dataset.h) || 300;
       const caption = box.querySelector('.mcaption');
       let vb = { x: 0, y: 0, w: W, h: H };
-      const apply = () => svg.setAttribute('viewBox', [vb.x, vb.y, vb.w, vb.h].map((n) => n.toFixed(2)).join(' '));
+      // Everything that must answer a view change -- constant-size labels and the
+      // semantic zoom that steps into a node -- hangs off this one hook, set once
+      // the interior is wired below.
+      let onView = () => {};
+      const apply = () => { svg.setAttribute('viewBox', [vb.x, vb.y, vb.w, vb.h].map((n) => n.toFixed(2)).join(' ')); onView(); };
       const reset = () => { vb = { x: 0, y: 0, w: W, h: H }; apply(); if (caption) caption.textContent = ''; };
       const toSvg = (cx, cy) => {
         const r = svg.getBoundingClientRect();
@@ -273,26 +277,23 @@ function shellHtml(data, tab, err) {
         vb.x = drag.vx - dx; vb.y = drag.vy - dy; apply();
       });
       const endDrag = () => { if (drag) { svg.classList.remove('panning'); } };
+      // A click frames the node; framing it is what opens it (see frame/onView
+      // below). Two handlers used to run here -- one zoomed to a quarter of the
+      // map, the other opened the zone and zoomed somewhere else -- so a click
+      // jumped twice and landed wrong. There is one path now.
+      let clickZone = () => {};
       svg.addEventListener('pointerup', (e) => {
         const wasDrag = drag && drag.moved; endDrag();
         drag = null;
         if (wasDrag) return;
-        const g = e.target.closest && e.target.closest('[data-zone]');
-        if (!g) return;
-        const c = g.querySelector('circle');
-        const cx = Number(c.getAttribute('cx')); const cy = Number(c.getAttribute('cy'));
-        // zoom to the node: a quarter of the map wide, centred on it
-        const w = W / 4; const h = H / 4;
-        vb = { x: cx - w / 2, y: cy - h / 2, w, h }; apply();
-        const t = g.querySelector('title');
-        if (caption) {
-          caption.textContent = t ? t.textContent : g.dataset.zone;
-          if (!g.classList.contains('grey')) {
-            const a = document.createElement('a'); a.href = '#'; a.textContent = 'findings ↓';
-            a.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); box.classList.remove('full'); showZone(g.dataset.zone); };
-            caption.appendChild(a);
-          }
+        const sym = e.target.closest && e.target.closest('[data-sym]');
+        if (sym) {
+          const f = sym.closest('[data-file]');
+          if (f) vscode.postMessage({ cmd: 'open-code', id: f.dataset.file + '#' + (sym.dataset.line || 1) });
+          return;
         }
+        const g = e.target.closest && e.target.closest('[data-zone]');
+        if (g) clickZone(g);
       });
       svg.addEventListener('pointercancel', () => { endDrag(); drag = null; });
       svg.addEventListener('dblclick', (e) => { e.preventDefault(); const g = e.target.closest && e.target.closest('[data-zone]'); if (g) { box.classList.remove('full'); showZone(g.dataset.zone); } });
@@ -306,14 +307,25 @@ function shellHtml(data, tab, err) {
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && box.classList.contains('full')) { box.classList.remove('full'); const b = box.querySelector('[data-graph="full"]'); if (b) b.textContent = '⤢ Full screen'; }
       });
-      // THE LEVEL BELOW THE ZONES, loaded like a stream. As soon as the zones are
-      // drawn the webview asks the extension for every zone's files (they exist
-      // while the map is still being read; symbols follow when graphify lands) and
-      // draws them as dots inside each zone. A click opens a zone: its files on a
-      // ring, their symbols around each file, the edges among them, and stubs
-      // toward other zones. The open zone and the view survive the panel's repaints
-      // through the webview's own state, so a five-second poll never closes what
-      // the person is looking at. The webview never reads the bridge itself.
+      // THE LEVEL BELOW THE ZONES, AND HOW YOU GET THERE.
+      //
+      // Zones are drawn by the server. The webview then asks the extension for
+      // every zone's files (they exist while the map is still being read; symbols
+      // arrive when graphify lands) and scatters them as dots inside each zone --
+      // density you can see at a glance, from the first second.
+      //
+      // ZOOM IS THE NAVIGATION. Wheel in far enough on a node and the view steps
+      // INSIDE it: that zone's files are laid out within its own circle, each with
+      // the symbols it contains and the edges among them. Zoom back out and it
+      // closes again. A click just frames the node, which crosses the same
+      // threshold -- so clicking and zooming cannot disagree. Hysteresis (enter at
+      // 30% of the view, leave below 18%) keeps it from flickering on the edge.
+      //
+      // LABELS DO NOT ZOOM. Text lives in the same viewBox as the drawing, so it
+      // grew with everything else; every label now carries its own base size and
+      // is rescaled by the view's factor on each change, which holds it at a
+      // constant size on screen. Strokes use non-scaling-stroke for the same
+      // reason. The webview never reads the bridge itself.
       const NS = 'http://www.w3.org/2000/svg';
       const mk = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
       const layer = mk('g', { class: 'mfiles' }); svg.appendChild(layer);
@@ -323,8 +335,23 @@ function shellHtml(data, tab, err) {
       const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; };
       const saved = (vscode.getState && vscode.getState()) || {};
       let openZone = saved.openZone || '';
+      let openData = null;
       const save = () => { if (vscode.setState) vscode.setState({ ...saved, openZone }); };
       const note = box.querySelector('.mload');
+
+      // Every label keeps its size on screen: base size in data-fs, times the view.
+      const rescale = () => {
+        const k = vb.w / W;
+        svg.querySelectorAll('text[data-fs]').forEach((t) => {
+          t.setAttribute('font-size', Math.max(0.4, Number(t.dataset.fs || 9) * k).toFixed(2));
+        });
+      };
+      const label = (x, y, text, size, fill) => {
+        const t = mk('text', { x: x.toFixed(1), y: y.toFixed(1), 'text-anchor': 'middle', fill: fill || '#cfd6e4', 'pointer-events': 'none', 'data-fs': String(size) });
+        t.textContent = text;
+        return t;
+      };
+
       const drawFiles = (data) => {
         while (layer.firstChild) layer.removeChild(layer.firstChild);
         const zones = (data && data.zones) || {};
@@ -345,29 +372,37 @@ function shellHtml(data, tab, err) {
         box.classList.toggle('partial', Boolean(data && data.partial));
         if (note) note.textContent = data && data.ok === false ? '' : (n ? n + ' files' + (data && data.partial ? ' · symbols still being read' : '') : 'reading files…');
       };
-      const drawOpen = (slug, data) => {
+
+      // Inside the node, drawn within the node's own circle -- so zooming in is
+      // literally going in, not an overlay landing on top of the map.
+      const drawInside = (slug, data) => {
         while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild);
-        const z = zoneAt[slug]; if (!z || !data || !data.ok) return;
-        const files = data.files || []; const R = Math.max(z.r * 4, W / 10);
+        Object.values(zoneAt).forEach((z) => z.g.classList.remove('open'));
+        const z = zoneAt[slug];
+        if (!z || !data || !data.ok) return;
+        z.g.classList.add('open');
+        layer.setAttribute('opacity', '0.12');
+        const files = data.files || [];
+        const R = z.r;
         const pos = {};
-        openLayer.appendChild(mk('circle', { cx: z.cx, cy: z.cy, r: R.toFixed(1), fill: '#0f1218', 'fill-opacity': '0.92', stroke: '#3794ff', 'stroke-width': '0.6' }));
         const edges = mk('g', { class: 'medges' }); openLayer.appendChild(edges);
+        const ring = files.length > 1 ? R * 0.58 : 0;
+        const fr = Math.max(R * 0.05, Math.min(R * 0.16, R * 0.9 / Math.max(3, files.length)));
         files.forEach((f, i) => {
           const a = 2 * Math.PI * i / Math.max(1, files.length) - Math.PI / 2;
-          const fx = z.cx + Math.cos(a) * R * 0.62; const fy = z.cy + Math.sin(a) * R * 0.62;
-          const syms = f.symbols || [];
-          const fr = Math.min(R * 0.09, 1.2 + Math.sqrt(syms.length) * 0.6);
+          const fx = z.cx + Math.cos(a) * ring; const fy = z.cy + Math.sin(a) * ring;
           const g = mk('g', { class: 'mfile', 'data-file': f.path });
-          g.appendChild(mk('circle', { cx: fx.toFixed(1), cy: fy.toFixed(1), r: fr.toFixed(2), fill: '#2b3345', stroke: '#9aa3b2', 'stroke-width': '0.4' }));
-          const label = mk('text', { x: fx.toFixed(1), y: (fy + fr + 3).toFixed(1), 'text-anchor': 'middle', 'font-size': Math.max(2.2, R * 0.04).toFixed(1), fill: '#cfd6e4' });
-          label.textContent = String(f.path).split('/').pop(); g.appendChild(label);
-          const t = mk('title', {}); t.textContent = f.path + ' · ' + syms.length + ' symbols'; g.appendChild(t);
+          const live = box.dataset.live && f.path === box.dataset.live;
+          g.appendChild(mk('circle', { cx: fx.toFixed(1), cy: fy.toFixed(1), r: fr.toFixed(2), fill: live ? '#3794ff' : '#2b3345', stroke: '#9aa3b2', 'stroke-width': '0.4', 'vector-effect': 'non-scaling-stroke', class: live ? 'live' : '' }));
+          const ft = mk('title', {}); ft.textContent = f.path + ' · ' + ((f.symbols || []).length) + ' symbols'; g.appendChild(ft);
+          g.appendChild(label(fx, fy + fr + R * 0.05, String(f.path).split('/').pop(), 3.2));
           pos[f.id] = { x: fx, y: fy };
+          const syms = f.symbols || [];
           syms.forEach((sy, j) => {
-            const b = 2 * Math.PI * j / Math.max(1, syms.length) + hash(sy.id) * 0.5;
-            const sr = fr * 1.9; const sx = fx + Math.cos(b) * sr; const syy = fy + Math.sin(b) * sr;
-            pos[sy.id] = { x: sx, y: syy };
-            const d = mk('circle', { cx: sx.toFixed(1), cy: syy.toFixed(1), r: Math.max(0.5, fr * 0.22).toFixed(2), fill: '#7fd3b9', 'data-sym': sy.id, 'data-line': sy.line || '' });
+            const b = 2 * Math.PI * j / Math.max(1, syms.length) + hash(sy.id) * 0.6;
+            const sr = fr * 2.1; const sx = fx + Math.cos(b) * sr; const sy2 = fy + Math.sin(b) * sr;
+            pos[sy.id] = { x: sx, y: sy2 };
+            const d = mk('circle', { cx: sx.toFixed(1), cy: sy2.toFixed(1), r: Math.max(fr * 0.22, 0.25).toFixed(2), fill: '#7fd3b9', 'data-sym': sy.id, 'data-line': sy.line || '' });
             const st = mk('title', {}); st.textContent = sy.label + ' · ' + f.path + (sy.line ? ':' + sy.line : ''); d.appendChild(st);
             g.appendChild(d);
           });
@@ -375,30 +410,74 @@ function shellHtml(data, tab, err) {
         });
         (data.edges || []).forEach((e) => {
           const a = pos[e.source]; const b = pos[e.target];
-          if (a && b) { edges.appendChild(mk('line', { x1: a.x.toFixed(1), y1: a.y.toFixed(1), x2: b.x.toFixed(1), y2: b.y.toFixed(1), stroke: e.relation === 'calls' ? '#7fd3b9' : '#3a4150', 'stroke-width': '0.25', 'stroke-opacity': '0.7' })); return; }
+          if (a && b) { edges.appendChild(mk('line', { x1: a.x.toFixed(1), y1: a.y.toFixed(1), x2: b.x.toFixed(1), y2: b.y.toFixed(1), stroke: e.relation === 'calls' ? '#7fd3b9' : '#4a5160', 'stroke-width': '0.5', 'stroke-opacity': '0.55', 'vector-effect': 'non-scaling-stroke' })); return; }
           const known = a || b; const other = zoneAt[a ? e.zone_b : e.zone_a];
-          if (known && other) { const dx = other.cx - known.x; const dy = other.cy - known.y; const L = Math.hypot(dx, dy) || 1; edges.appendChild(mk('line', { x1: known.x.toFixed(1), y1: known.y.toFixed(1), x2: (known.x + dx / L * R * 0.5).toFixed(1), y2: (known.y + dy / L * R * 0.5).toFixed(1), stroke: '#c2811f', 'stroke-width': '0.25', 'stroke-dasharray': '1 1' })); }
+          if (known && other) {
+            const dx = other.cx - known.x; const dy = other.cy - known.y; const L = Math.hypot(dx, dy) || 1;
+            edges.appendChild(mk('line', { x1: known.x.toFixed(1), y1: known.y.toFixed(1), x2: (known.x + dx / L * R * 0.45).toFixed(1), y2: (known.y + dy / L * R * 0.45).toFixed(1), stroke: '#c2811f', 'stroke-width': '0.5', 'stroke-dasharray': '2 2', 'vector-effect': 'non-scaling-stroke' }));
+          }
         });
         const nSym = files.reduce((n, f) => n + (f.symbols || []).length, 0);
-        if (caption) caption.textContent = slug + ' · ' + files.length + ' files · ' + nSym + ' symbols · ' + (data.edges || []).length + ' edges' + (data.partial ? ' · still being read' : '');
-        const w = R * 2.3; const h = w * (H / W); vb = { x: z.cx - w / 2, y: z.cy - h / 2, w, h }; apply();
+        if (caption) {
+          caption.textContent = slug + ' · ' + files.length + ' files · ' + nSym + ' symbols · ' + ((data.edges || []).length) + ' edges' + (data.partial ? ' · still being read' : '');
+          const a = document.createElement('a'); a.href = '#'; a.textContent = 'findings ↓';
+          a.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); box.classList.remove('full'); showZone(slug); };
+          caption.appendChild(a);
+        }
+        rescale();
       };
+
+      const closeInside = () => {
+        layer.setAttribute('opacity', '1');
+        while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild);
+        Object.values(zoneAt).forEach((z) => z.g.classList.remove('open'));
+        openData = null;
+        if (caption) caption.textContent = '';
+      };
+
       const ask = (zone) => vscode.postMessage({ cmd: 'graph', zone: zone || '' });
+
+      // How much of the view a zone fills, and whether the view is on it.
+      const share = (z) => (2 * z.r) / Math.max(vb.w, 1e-6);
+      const centred = (z) => Math.hypot(z.cx - (vb.x + vb.w / 2), z.cy - (vb.y + vb.h / 2)) < z.r * 1.3;
+      const nearest = () => {
+        const cx = vb.x + vb.w / 2; const cy = vb.y + vb.h / 2;
+        let best = ''; let bestD = Infinity;
+        Object.keys(zoneAt).forEach((slug) => {
+          const d = Math.hypot(zoneAt[slug].cx - cx, zoneAt[slug].cy - cy);
+          if (d < bestD) { bestD = d; best = slug; }
+        });
+        return best;
+      };
+      const step = () => {
+        const near = nearest();
+        let want = openZone;
+        if (near && centred(zoneAt[near]) && share(zoneAt[near]) > 0.30) want = near;
+        else if (openZone && (!zoneAt[openZone] || share(zoneAt[openZone]) < 0.18)) want = '';
+        if (want === openZone) return;
+        openZone = want; save();
+        if (!want) { closeInside(); return; }
+        if (openData && openData.zone === want) drawInside(want, openData); else ask(want);
+      };
+      onView = () => { rescale(); step(); };
+
+      // A click frames the node; framing it crosses the threshold, which opens it.
+      clickZone = (g) => {
+        const z = zoneAt[g.dataset.zone]; if (!z) return;
+        const w = Math.max(z.r * 4.2, W / 24); const h = w * (H / W);
+        vb = { x: z.cx - w / 2, y: z.cy - h / 2, w, h };
+        apply();
+      };
+
       window.addEventListener('message', (ev) => {
         const m = ev.data || {}; if (m.cmd !== 'graph') return;
         if (!m.zone) { drawFiles(m.data); if (openZone) ask(openZone); return; }
-        if (m.zone === openZone) drawOpen(m.zone, m.data);
+        openData = { zone: m.zone, ...(m.data || {}) };
+        if (m.zone === openZone) drawInside(m.zone, m.data);
       });
-      svg.addEventListener('click', (e) => {
-        const s = e.target.closest && e.target.closest('[data-sym]');
-        if (s) { const f = s.closest('[data-file]'); if (f) vscode.postMessage({ cmd: 'open-code', id: f.dataset.file + '#' + (s.dataset.line || 1) }); return; }
-        const g = e.target.closest && e.target.closest('[data-zone]');
-        if (!g) return;
-        openZone = g.dataset.zone; save(); ask(openZone);
-      });
-      const closeOpen = () => { openZone = ''; while (openLayer.firstChild) openLayer.removeChild(openLayer.firstChild); save(); };
-      box.querySelectorAll('[data-graph="reset"]').forEach((b) => b.addEventListener('click', closeOpen));
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openZone) { closeOpen(); reset(); } });
+      box.querySelectorAll('[data-graph="reset"]').forEach((b) => b.addEventListener('click', () => { openZone = ''; save(); closeInside(); }));
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openZone) { openZone = ''; save(); closeInside(); reset(); } });
+      rescale();
       ask('');
     });
     document.querySelectorAll('[data-id]').forEach((btn) => {
