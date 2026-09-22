@@ -190,7 +190,7 @@ describe('a job outlives the turn that started it', () => {
     // Live: the dev host was relaunched three times while run 2 kept going, so
     // the run had nobody watching it. /run (or /run status) should pick it up.
     const answers = [
-      { running: true, progress: { task: 't.ops-center.tsx', attempt: 3, phase: 'asking the model' }, run: { status: 'running', results: [] } },
+      { running: true, plan: { tasks: [{ id: 't.a' }, { id: 't.b' }] }, progress: { task: 't.ops-center.tsx', attempt: 3, phase: 'asking the model' }, run: { status: 'running', results: [] } },
       { running: false, run: { status: 'complete', closed: 1, cost_usd: 0.2, results: [{ task: 't.ops-center.tsx', outcome: 'closed', attempts: 3, cost_usd: 0.2 }] } },
     ];
     let i = 0;
@@ -199,6 +199,7 @@ describe('a job outlives the turn that started it', () => {
     const on = await streamJob({ client: live, repo: 'x', kind: 'run', response: r1, attach: true, sleep: async () => {} });
     assert.equal(on.ended, 'done');
     assert.match(r1.parts.join('\n'), /ops-center\.tsx · attempt 3 · asking the model/);
+    assert.ok(!r1.parts.join('\n').includes('plan:'), 'the plan it is working from was already there -- not news');
     assert.match(r1.parts.join('\n'), /✓ ops-center\.tsx — closed after 3 attempts/);
 
     let reads = 0;

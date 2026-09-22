@@ -132,7 +132,10 @@ async function streamJob({ client, repo, kind, response, token, attach = false, 
       // that is this job's work and nobody else's.
       if (!baselined) {
         baselined = true;
-        prev = { run: map.run, ship: map.ship };
+        // Attaching to someone else's job: the plan it is working from was
+        // already there too, so it is history like the results. A job we
+        // started ourselves may still be building its plan -- that is news.
+        prev = attach ? { run: map.run, ship: map.ship, plan: map.plan } : { run: map.run, ship: map.ship };
       }
       const events = diffEvents(prev, map, kind);
       for (const line of events) { response.markdown(`\n${line}`); lines += 1; }
