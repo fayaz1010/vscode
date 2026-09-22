@@ -787,7 +787,7 @@ async function autoSaveFlow({ client, goal, ledger, response }) {
   if (!steps) return null;
   try {
     const out = await client.invoke('personal_autoflow_record', {
-      goal: String(goal || '').slice(0, 300),
+      goal: String(goal || '').replace(/^(?:@at\s+)+/i, '').trim().slice(0, 300),
       steps,
       eval: { source: 'dest-chat', calls: steps.length },
     }, { autoApprove: true });
@@ -795,7 +795,7 @@ async function autoSaveFlow({ client, goal, ledger, response }) {
     const saved = data.saved || data;
     const id = saved && saved.id ? ` ${saved.id}` : '';
     if (response && typeof response.markdown === 'function') {
-      response.markdown(`\n\n*learned: ${steps.length} step${steps.length === 1 ? '' : 's'} saved for "${clip(goal, 60)}"${id}*`);
+      response.markdown(`\n\n*learned: ${steps.length} step${steps.length === 1 ? '' : 's'} saved for "${clip(String(goal || '').replace(/^(?:@at\s+)+/i, '').trim(), 60)}"${id}*`);
     }
     return steps;
   } catch {

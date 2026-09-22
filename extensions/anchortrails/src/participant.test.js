@@ -756,7 +756,7 @@ describe('the tool loop', () => {
     const saves = [];
     const client = computerClient({ async invoke(name, args, opts) { saves.push({ name, args, opts }); return { ok: true, data: { saved: { id: 'af01' } } }; } });
     const response = stream();
-    await handleTurn({ client, vscode, request: { prompt: 'ask claude desktop what is 9x8' }, context: { history: [] }, response });
+    await handleTurn({ client, vscode, request: { prompt: '@at @at ask claude desktop what is 9x8' }, context: { history: [] }, response });
     assert.equal(saves.length, 1);
     assert.equal(saves[0].name, 'personal_autoflow_record');
     assert.equal(saves[0].args.goal, 'ask claude desktop what is 9x8');
