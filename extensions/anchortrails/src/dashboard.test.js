@@ -118,8 +118,8 @@ describe('Dashboard tab', () => {
     assert.equal(taskPath({ execution: { write_scope: ['a/b.js'] } }), 'a/b.js');
     assert.equal(taskPath({ title: 'a/c.js: implement the declared behaviour' }), 'a/c.js');
     assert.equal(taskPath({}), '');
-    assert.deepEqual(runTotals(MAP.run), { results: 2, closed: 1, failed: 1, handedOff: 0, skipped: 0, cost: 0.0165, costAll: null, models: [], seconds: 640, status: 'running', dry: false });
-    assert.deepEqual(runTotals(null), { results: 0, closed: 0, failed: 0, handedOff: 0, skipped: 0, cost: null, costAll: null, models: [], seconds: null, status: '', dry: false });
+    assert.deepEqual(runTotals(MAP.run), { results: 2, closed: 1, failed: 1, handedOff: 0, skipped: 0, reported: 0, cost: 0.0165, costAll: null, models: [], seconds: 640, status: 'running', dry: false });
+    assert.deepEqual(runTotals(null), { results: 0, closed: 0, failed: 0, handedOff: 0, skipped: 0, reported: 0, cost: null, costAll: null, models: [], seconds: null, status: '', dry: false });
     const rows = markerRows(MAP.overview);
     assert.deepEqual(rows.map((r) => [r.name, r.actionable, r.total, r.tier]), [
       ['bus_factor', 3, 3, 'C'], ['config_orphan', 1, 1, 'B'], ['stub_body', 0, 16, 'A'], ['todo_debt', 0, 1, ''],
@@ -349,6 +349,19 @@ describe('a task no model could finish', () => {
   it('reads as handed over, not as a dead end', () => {
     assert.equal(runMark(ROW).mark, '→');
     assert.equal(runMark(ROW).label, 'handed over with a brief');
+  });
+
+  it('a hop that came back is reported, and it is not closed', () => {
+    const row = { task: 't.hop', outcome: 'reported', why: 'the guard is the page' };
+    assert.equal(runMark(row).mark, '→');
+    assert.equal(runMark(row).label, 'reported, not verified');
+    const t = runTotals({ results: [row, { task: 't.b', outcome: 'closed' }, { task: 't.c', outcome: 'failed' }] });
+    assert.equal(t.reported, 1);
+    assert.equal(t.closed, 1);
+    assert.equal(t.failed, 1);
+    assert.equal(t.closed + t.failed + t.reported, t.results);
+    const { runSummary } = require('./plan');
+    assert.equal(runSummary({ results: [row], cost_usd: 0 }), 'run: 0 closed · 1 reported · $0.00');
   });
 
   it('still counts as unfinished', () => {

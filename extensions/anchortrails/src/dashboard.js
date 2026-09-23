@@ -96,6 +96,7 @@ function runTotals(run) {
     failed: n('failed', 'failed_handoff'),
     handedOff: n('failed_handoff'),
     skipped: n('skipped_dirty', 'blocked'),
+    reported: n('reported'),
     cost: run && run.cost_usd != null ? Number(run.cost_usd) : null,
     costAll: run && run.cost_all_runs_usd != null ? Number(run.cost_all_runs_usd) : null,
     models: run && Array.isArray(run.models) ? run.models : [],
@@ -204,6 +205,7 @@ function dashboardHtml(map, esc, focusTask) {
     ${tile(String(tasks.length), 'planned tasks')}
     ${tile(String(tot.closed), 'closed', tot.closed ? 'good' : '')}
     ${tile(String(tot.failed), 'failed', tot.failed ? 'bad' : '')}
+    ${tot.reported ? tile(String(tot.reported), 'reported') : ''}
     ${tile(escape(money(tot.cost)), 'this run')}
     ${tot.costAll != null ? tile(escape(money(tot.costAll)), 'all runs') : ''}
     ${tile(escape(clock(tot.seconds)), 'run time')}
@@ -214,7 +216,7 @@ function dashboardHtml(map, esc, focusTask) {
   const denom = Math.max(tasks.length, tot.results, 1);
   const pct = (n) => `${Math.round((n / denom) * 100)}%`;
   const progress = tasks.length || tot.results
-    ? `<div class="bar" title="${tot.closed} closed · ${tot.failed} failed · ${Math.max(denom - tot.closed - tot.failed, 0)} open">
+    ? `<div class="bar" title="${tot.closed} closed · ${tot.failed} failed${tot.reported ? ` · ${tot.reported} reported` : ''} · ${Math.max(denom - tot.closed - tot.failed - tot.reported, 0)} open">
         <span class="seg good" style="width:${pct(tot.closed)}"></span><span class="seg bad" style="width:${pct(tot.failed)}"></span></div>`
     : '';
 

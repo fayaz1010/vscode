@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const {
-  BUILTIN_DELEGATE, SCHEMA, AGENTS, AUTO_ORDER, spec, changedSince, resolveWindowsShim, runOne, delegate, createImpl, register,
+  BUILTIN_DELEGATE, SCHEMA, AGENTS, AUTO_ORDER, spec, changedSince, parsePorcelainZ, resolveWindowsShim, runOne, delegate, createImpl, register,
 } = require('./delegate');
 
 // TESTS NEVER TOUCH A REAL INSTALLED CLI. `claude` and `codex` are on PATH on
@@ -108,6 +108,53 @@ describe('dest delegateToAgent', () => {
     const after = [' M src/a.ts', '?? old.txt', '?? new.ts', ' M src/b.ts'];
     assert.deepEqual(changedSince(before, after), ['new.ts', 'src/b.ts']);
     assert.deepEqual(changedSince([], []), []);
+  });
+
+  it('parses a rename as two paths and keeps a space in the name', () => {
+    const raw = 'R  kept.txt\0renamed.txt\0?? sub/my file.txt\0';
+    assert.deepEqual(parsePorcelainZ(raw), ['kept.txt', 'renamed.txt', 'sub/my file.txt']);
+  });
+
+  it('puts back a file the CLI wrote outside the task scope', async () => {
+    const repo = await tmpRepo();
+    const agents = {
+      claude: stubAgent(repo, "require('fs').writeFileSync('kept.txt', 'in'); require('fs').writeFileSync('other.txt', 'out');"),
+      cursor: AGENTS.cursor,
+      codex: AGENTS.codex,
+    };
+    const out = await runOne('claude', 'x', repo, agents, [], ['kept.txt']);
+    assert.deepEqual(out.changed_files, ['kept.txt']);
+    assert.deepEqual(out.reverted, ['other.txt']);
+    assert.equal(fs.existsSync(path.join(repo, 'other.txt')), false);
+    assert.equal(fs.readFileSync(path.join(repo, 'kept.txt'), 'utf8'), 'in');
+  });
+
+  it('puts back pre-call bytes of a dirty file, a rename, and a path with a space', async () => {
+    const repo = await tmpRepo();
+    const git = (args) => new Promise((resolve, reject) => {
+      execFile('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: repo }, (err) => (err ? reject(err) : resolve()));
+    });
+    fs.writeFileSync(path.join(repo, 'dirty.txt'), 'base\n');
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'v1\n');
+    await git(['add', 'dirty.txt', 'tracked.txt']);
+    await git(['commit', '-qm', 'base']);
+    fs.writeFileSync(path.join(repo, 'dirty.txt'), 'base\nmine\n');
+    const body = [
+      "require('fs').writeFileSync('kept.txt', 'in');",
+      "require('fs').writeFileSync('dirty.txt', 'base\\nmine\\nCLI\\n');",
+      "require('fs').mkdirSync('sub', {recursive:true});",
+      "require('fs').writeFileSync('sub/my file.txt', 'x');",
+      "require('child_process').execFileSync('git', ['mv', 'tracked.txt', 'renamed.txt']);",
+    ].join('\n');
+    const agents = { claude: stubAgent(repo, body), cursor: AGENTS.cursor, codex: AGENTS.codex };
+    const out = await runOne('claude', 'x', repo, agents, [], ['kept.txt']);
+    assert.deepEqual(out.changed_files, ['kept.txt']);
+    assert.deepEqual([...out.reverted].sort(), ['dirty.txt', 'renamed.txt', 'sub/my file.txt', 'tracked.txt']);
+    assert.equal(fs.readFileSync(path.join(repo, 'dirty.txt'), 'utf8'), 'base\nmine\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'tracked.txt'), 'utf8'), 'v1\n');
+    assert.equal(fs.existsSync(path.join(repo, 'renamed.txt')), false);
+    assert.equal(fs.existsSync(path.join(repo, 'sub/my file.txt')), false);
+    assert.equal(fs.readFileSync(path.join(repo, 'kept.txt'), 'utf8'), 'in');
   });
 
   it("reads real git status before and after a run, not the agent's own say-so", async () => {

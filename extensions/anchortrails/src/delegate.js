@@ -36,25 +36,49 @@ const GIT_TIMEOUT_MS = 15_000;
 const AGENTS = {
   claude: {
     bin: 'claude',
-    args: (task) => ['-p', task, '--output-format', 'json'],
+    args: (task, flags) => withFlags(['-p'], task, flags, ['--output-format', 'json']),
     note: 'Claude Code, print mode. No --dangerously-skip-permissions: an '
       + 'action needing approval fails closed instead of running unattended.',
   },
   cursor: {
     bin: 'cursor-agent',
-    args: (task) => ['-p', task],
+    args: (task, flags) => withFlags(['-p'], task, flags),
     note: 'Cursor CLI, print mode. Best-effort flags -- confirm against the '
       + 'installed `cursor-agent --help` if this errors on an unknown flag.',
   },
   codex: {
     bin: 'codex',
-    args: (task) => ['exec', task],
+    args: (task, flags) => withFlags(['exec'], task, flags),
     note: 'OpenAI Codex CLI, non-interactive exec. Best-effort flags -- '
       + 'confirm against the installed `codex --help` if this errors.',
   },
 };
 
 const AUTO_ORDER = ['claude', 'cursor', 'codex'];
+
+// A task may name extra flags. They are separate argv entries, never a
+// shell string. Approval-skipping flags are dropped: a CLI that needs a
+// person to approve stops instead of running unattended.
+const REFUSED_FLAGS = new Set([
+  '--dangerously-skip-permissions',
+  '--dangerously-bypass-approvals-and-sandbox',
+  '--yolo',
+]);
+
+function cleanFlags(flags) {
+  const out = [];
+  for (const raw of flags || []) {
+    const token = String(raw == null ? '' : raw).trim();
+    if (!token || REFUSED_FLAGS.has(token.split('=')[0])) continue;
+    if (/[\n;&|`]/.test(token)) continue;
+    out.push(token);
+  }
+  return out;
+}
+
+function withFlags(head, task, flags, tail) {
+  return [...head, ...cleanFlags(flags), task, ...(tail || [])];
+}
 
 const SCHEMA = {
   type: 'object',
@@ -71,6 +95,11 @@ const SCHEMA = {
     cwd: {
       type: 'string',
       description: 'Working directory the agent runs in. Defaults to the open folder.',
+    },
+    flags: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Extra flags for this CLI, each its own argument. A model flag can decide which CLI the task is assigned to.',
     },
   },
   required: ['agent', 'task'],
@@ -103,32 +132,188 @@ function textResult(vscode, data) {
   return { content: [{ type: 'text', value: text }] };
 }
 
-function gitStatusLines(cwd) {
+/** `git status --porcelain -z`: NUL-separated, unquoted. A rename is two
+ * records (`R  old\\0new\\0`), so both paths come back as paths. A name
+ * with a space is the name, not a quoted string. */
+function parsePorcelainZ(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw || '');
+  const chunks = text.split('\0');
+  if (chunks.length && chunks[chunks.length - 1] === '') chunks.pop();
+  const paths = [];
+  let i = 0;
+  while (i < chunks.length) {
+    const head = chunks[i++];
+    if (!head || head.length < 4) continue;
+    const xy = head.slice(0, 2);
+    const path = head.slice(3);
+    const renamed = xy.includes('R') || xy.includes('C');
+    if (renamed) {
+      const dest = chunks[i++] || '';
+      if (path) paths.push(path);
+      if (dest) paths.push(dest);
+    } else if (path) {
+      paths.push(path);
+    }
+  }
+  return paths;
+}
+
+function gitStatusPaths(cwd) {
   return new Promise((resolve) => {
-    execFile('git', ['status', '--porcelain'], {
+    execFile('git', ['status', '--porcelain', '-z', '--untracked-files=all'], {
       cwd: cwd || undefined,
       windowsHide: true,
       timeout: GIT_TIMEOUT_MS,
+      encoding: 'buffer',
     }, (err, stdout) => {
-      // Not a git repo, git missing, or the call itself timed out: diffing
-      // is a nicety, not a requirement, so a failure here is silent -- the
-      // caller still gets the agent's own stdout/stderr either way.
       if (err) return resolve(null);
-      const lines = String(stdout || '')
-        .split('\n')
-        .map((l) => l.replace(/\r$/, ''))
-        .filter(Boolean);
-      resolve(lines);
+      resolve(parsePorcelainZ(stdout));
     });
   });
 }
 
-/** Lines present after the call that were not present before: new dirt this
- * call caused, or a file's status changing further while already dirty
- * shows up too since the whole line (status codes + path) is compared. A
- * file dirty in exactly the same way before and after will not show --
- * that is the one case this cannot see, and it is an acceptable gap for a
- * "what did this just do" summary rather than a full diff. */
+function inScope(file, scope) {
+  const norm = String(file || '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  const allowed = new Set((scope || []).map((s) => String(s).trim().replace(/\\/g, '/').replace(/^\.\//, '')));
+  return Boolean(norm) && allowed.has(norm);
+}
+
+function safeRel(file) {
+  const norm = String(file || '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!norm || norm.split('/').includes('..')) return '';
+  return norm;
+}
+
+function readBytes(cwd, rel) {
+  const full = joinPath(cwd, rel);
+  try {
+    if (!fs.existsSync(full)) return null;
+    return fs.readFileSync(full);
+  } catch {
+    return null;
+  }
+}
+
+function writeBytes(cwd, rel, body) {
+  const full = joinPath(cwd, rel);
+  if (body == null) {
+    try { if (fs.existsSync(full)) fs.unlinkSync(full); } catch { /* already gone */ }
+    return;
+  }
+  const dir = full.replace(/\/[^/]*$/, '');
+  if (dir && dir !== full) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(full, body);
+}
+
+function bytesEqual(a, b) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return Buffer.compare(a, b) === 0;
+}
+
+/** Bytes of every path already dirty, taken before the CLI runs. A path
+ * that is missing is stored as null so a file the CLI creates there can
+ * be removed again. A path this map does not contain was clean. */
+function snapshotOf(cwd, paths) {
+  const snap = new Map();
+  for (const file of paths || []) {
+    const rel = safeRel(file);
+    if (!rel || snap.has(rel)) continue;
+    snap.set(rel, readBytes(cwd, rel));
+  }
+  return snap;
+}
+
+function indexEntries(cwd) {
+  return new Promise((resolve) => {
+    execFile('git', ['ls-files', '-s', '-z'], {
+      cwd: cwd || undefined,
+      windowsHide: true,
+      timeout: GIT_TIMEOUT_MS,
+      encoding: 'buffer',
+    }, (err, stdout) => {
+      if (err) return resolve(null);
+      const map = new Map();
+      const text = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : String(stdout || '');
+      for (const row of text.split('\0')) {
+        if (!row) continue;
+        const tab = row.indexOf('\t');
+        if (tab < 0) continue;
+        map.set(row.slice(tab + 1), row.slice(0, tab));
+      }
+      resolve(map);
+    });
+  });
+}
+
+function resetIndex(cwd, rel) {
+  return new Promise((resolve) => {
+    execFile('git', ['-C', cwd, 'reset', '-q', '--', rel], {
+      windowsHide: true,
+      timeout: GIT_TIMEOUT_MS,
+    }, () => resolve());
+  });
+}
+
+function headBytes(cwd, rel) {
+  return new Promise((resolve) => {
+    execFile('git', ['-C', cwd, 'show', `HEAD:${rel}`], {
+      windowsHide: true,
+      timeout: GIT_TIMEOUT_MS,
+      encoding: 'buffer',
+    }, (err, stdout) => {
+      if (err) return resolve(null);
+      resolve(stdout);
+    });
+  });
+}
+
+/** Paths whose bytes differ from the pre-call snapshot, including a file
+ * that was already dirty and was edited further (its porcelain line does
+ * not change) and a path that was clean. */
+function changedPaths(cwd, snap, before, after) {
+  if (!after) return null;
+  const names = new Set();
+  for (const p of before || []) { const r = safeRel(p); if (r) names.add(r); }
+  for (const p of after || []) { const r = safeRel(p); if (r) names.add(r); }
+  const out = [];
+  for (const rel of names) {
+    const now = readBytes(cwd, rel);
+    if (snap.has(rel)) {
+      if (!bytesEqual(snap.get(rel), now)) out.push(rel);
+    } else if (now != null || (after || []).some((p) => safeRel(p) === rel)) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+/** Put an out-of-scope path back to the bytes captured before the call.
+ * A path the snapshot holds is written back as those bytes, including
+ * work that was already uncommitted. A path the snapshot does not hold
+ * was clean, so HEAD is the same bytes; a path in neither is a new file
+ * and is removed. The index is reset only when this call changed that
+ * path's index record (a rename). A file the person had already staged
+ * is left staged. Nothing here runs `git checkout`. */
+async function revertOutside(cwd, changed, scope, snap, indexBefore, indexAfter) {
+  const reverted = [];
+  for (const file of changed || []) {
+    if (inScope(file, scope)) continue;
+    const rel = safeRel(file);
+    if (!rel) continue;
+    const body = snap && snap.has(rel) ? snap.get(rel) : await headBytes(cwd, rel);
+    const beforeRec = indexBefore ? indexBefore.get(rel) : undefined;
+    const afterRec = indexAfter ? indexAfter.get(rel) : undefined;
+    if (indexBefore && indexAfter && beforeRec !== afterRec) await resetIndex(cwd, rel);
+    writeBytes(cwd, rel, body);
+    reverted.push(rel);
+  }
+  return reverted;
+}
+
+/** Lines present after the call that were not present before. A file dirty
+ * in exactly the same way before and after will not show. The write fence
+ * does not use this list: it compares bytes captured before the call. */
 function changedSince(before, after) {
   if (!before || !after) return null;
   const had = new Set(before);
@@ -222,15 +407,25 @@ function runAgentBin(bin, args, cwd) {
   });
 }
 
-async function runOne(name, task, cwd, agents = AGENTS) {
+async function runOne(name, task, cwd, agents = AGENTS, flags, scope) {
   const agent = agents[name];
   if (!agent) return { ok: false, error: `unknown agent "${name}"` };
-  const before = await gitStatusLines(cwd);
-  const run = await runAgentBin(agent.bin, agent.args(task), cwd);
+  const before = await gitStatusPaths(cwd);
+  const snap = before ? snapshotOf(cwd, before) : null;
+  const indexBefore = Array.isArray(scope) && before ? await indexEntries(cwd) : null;
+  const run = await runAgentBin(agent.bin, agent.args(task, flags), cwd);
   if (run.missing) {
     return { ok: false, agent: name, missing: true, error: `\`${agent.bin}\` is not installed, or not on PATH` };
   }
-  const after = await gitStatusLines(cwd);
+  let after = await gitStatusPaths(cwd);
+  let changed = snap ? changedPaths(cwd, snap, before, after) : null;
+  let reverted = [];
+  if (Array.isArray(scope) && changed && snap) {
+    const indexAfter = await indexEntries(cwd);
+    reverted = await revertOutside(cwd, changed, scope, snap, indexBefore, indexAfter);
+    after = await gitStatusPaths(cwd);
+    changed = changedPaths(cwd, snap, before, after);
+  }
   return {
     ok: run.ok,
     agent: name,
@@ -238,7 +433,8 @@ async function runOne(name, task, cwd, agents = AGENTS) {
     exit: run.exit,
     timed_out: run.timedOut,
     duration_ms: run.duration_ms,
-    changed_files: changedSince(before, after),
+    changed_files: changed,
+    reverted,
     stdout: run.stdout,
     stderr: run.stderr,
     error: run.error,
@@ -251,12 +447,14 @@ async function delegate(input, defaultCwd, agents = AGENTS) {
   if (shellBlocked(task)) return { ok: false, error: 'blocked: this reads as a destructive shell action' };
   const cwd = String((input && input.cwd) || defaultCwd || process.cwd());
   const agent = String((input && input.agent) || 'auto').trim();
+  const flags = cleanFlags(input && input.flags);
+  const scope = Array.isArray(input && input.scope) ? input.scope : undefined;
   if (agent !== 'auto') {
-    return runOne(agent, task, cwd, agents);
+    return runOne(agent, task, cwd, agents, flags, scope);
   }
   const tried = [];
   for (const name of AUTO_ORDER) {
-    const out = await runOne(name, task, cwd, agents);
+    const out = await runOne(name, task, cwd, agents, flags, scope);
     if (!out.missing) return out;
     tried.push(name);
   }
@@ -316,7 +514,12 @@ module.exports = {
   AUTO_ORDER,
   spec,
   changedSince,
+  parsePorcelainZ,
+  inScope,
+  revertOutside,
   resolveWindowsShim,
+  cleanFlags,
+  withFlags,
   runOne,
   delegate,
   createImpl,

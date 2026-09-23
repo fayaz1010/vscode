@@ -129,8 +129,9 @@ function nextAhead(plan) {
   }
   return (
     'Continue the plan until the objective is met and verified. '
-    + `Goal: ${goal}. Do only: ${step}. Verify with checkErrors. `
-    + 'Do not wait for another prompt.'
+    + `Goal: ${goal}. Do only: ${step}. `
+    + 'The MAP task in the system is the work. Do not invent a second plan. '
+    + 'Verify with checkErrors. Do not wait for another prompt.'
   );
 }
 

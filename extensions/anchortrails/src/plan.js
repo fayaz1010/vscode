@@ -184,6 +184,9 @@ const RUN_MARK = {
   // missed, so the task left the ladder and went to an IDE with a brief. It is
   // still unfinished -- the ship gate holds on it -- but it is somewhere.
   failed_handoff: ['→', 'handed over with a brief'],
+  // THE NODE ANSWERED, AND NOTHING VERIFIED IT. A hop or a computer sequence
+  // that came back is recorded, and it stays open. The next run sends it again.
+  reported: ['→', 'reported, not verified'],
   skipped_dirty: ['⊘', 'skipped: uncommitted changes'],
   blocked: ['⊘', 'blocked'],
   would_run: ['·', 'would run'],
@@ -207,8 +210,10 @@ function runSummary(run) {
   const n = (o) => run.results.filter((r) => r.outcome === o).length;
   const closed = n('closed') + n('closed_unreviewed') + n('already_closed');
   const failed = n('failed') + n('failed_handoff');
+  const reported = n('reported');
   const parts = [`run: ${closed} closed`];
   if (failed) parts.push(`${failed} failed`);
+  if (reported) parts.push(`${reported} reported`);
   if (run.cost_usd != null) parts.push(`$${Number(run.cost_usd).toFixed(2)}`);
   return parts.join(' · ');
 }

@@ -15,17 +15,25 @@ const SCHEMA = {
     path: { type: 'string', description: 'Absolute or workspace-relative file path.' },
     contents: { type: 'string', description: 'Full file contents. Creates the file if missing.' },
     old_string: { type: 'string', description: 'Exact text to replace when not rewriting the whole file.' },
-    new_string: { type: 'string', description: 'Replacement for old_string.' },
+    new_string: { type: 'string', description: 'Replacement for old_string, or the new lines for a ranged replace.' },
+    start_line: { type: 'integer', description: '1-based first line to replace. Use this after old_string misses.' },
+    end_line: { type: 'integer', description: '1-based last line to replace, inclusive. Defaults to start_line.' },
   },
   required: ['path'],
 };
+
+const REWRITE_LINE_CAP = 400;
+const misses = new Map();
 
 function spec() {
   return {
     name: BUILTIN_EDIT,
     description: (
       'Write or patch a file in dest\'s editor (WorkspaceEdit). '
-      + 'The file stays open. After this, call checkErrors before greening a plan step.'
+      + 'The file stays open. A missed old_string comes back with numbered lines; '
+      + 'the next attempt uses start_line and end_line, not the same string. '
+      + 'A file over 400 lines is patched, never rewritten. '
+      + 'After this, call checkErrors before greening a plan step.'
     ),
     inputSchema: SCHEMA,
   };
@@ -39,6 +47,28 @@ function resolvePath(vscode, raw) {
   if (!root) return value;
   const sep = root.includes('\\') ? '\\' : '/';
   return `${root.replace(/[\\/]$/, '')}${sep}${value.replace(/^[\\/]/, '')}`;
+}
+
+function numbered(text, start, end) {
+  const lines = String(text || '').split('\n');
+  const a = Math.max(0, start);
+  const b = Math.min(lines.length, end);
+  return lines.slice(a, b).map((line, i) => `${a + i + 1}|${line}`).join('\n');
+}
+
+function nearby(current, needle) {
+  const lines = String(current || '').split('\n');
+  const wanted = String(needle || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  const probe = wanted[0] || '';
+  const chunk = probe.slice(0, 40);
+  let hit = -1;
+  if (chunk.length >= 8) hit = lines.findIndex((line) => line.includes(chunk));
+  if (hit < 0 && probe) {
+    const words = probe.split(/\s+/).filter((w) => w.length > 4).slice(0, 3);
+    if (words.length) hit = lines.findIndex((line) => words.every((w) => line.includes(w)));
+  }
+  if (hit < 0) return numbered(current, 0, 12);
+  return numbered(current, Math.max(0, hit - 3), hit + 8);
 }
 
 function textResult(vscode, data) {
@@ -83,10 +113,56 @@ async function applyHunk(vscode, input) {
     return { ok: true, path, created: true, bytes: Buffer.byteLength(body, 'utf8') };
   }
   const current = typeof doc.getText === 'function' ? doc.getText() : '';
-  let next = contents;
-  if (next == null && oldString != null) {
+  const lineCount = current ? current.split('\n').length : (doc.lineCount || 0);
+  const startLine = input.start_line != null ? Number(input.start_line) : null;
+  let next = null;
+  if (startLine != null) {
+    if (!Number.isInteger(startLine) || startLine < 1) {
+      return { ok: false, error: 'start_line must be a 1-based integer', path };
+    }
+    const endLine = input.end_line != null ? Number(input.end_line) : startLine;
+    if (!Number.isInteger(endLine) || endLine < startLine) {
+      return { ok: false, error: 'end_line must be >= start_line', path };
+    }
+    const lines = current.split('\n');
+    if (startLine > lines.length) {
+      return {
+        ok: false, error: 'start_line past end', path, line_count: lines.length,
+        around: numbered(current, Math.max(0, lines.length - 12), lines.length),
+      };
+    }
+    if (input.new_string == null) {
+      return { ok: false, error: 'new_string required for a ranged replace', path };
+    }
+    const end = Math.min(endLine, lines.length);
+    lines.splice(startLine - 1, end - startLine + 1, ...newString.split('\n'));
+    next = lines.join('\n');
+  } else if (contents != null && oldString == null) {
+    if (lineCount > REWRITE_LINE_CAP) {
+      return {
+        ok: false,
+        error: `file has ${lineCount} lines; patch with old_string or start_line/end_line`,
+        path,
+        line_count: lineCount,
+      };
+    }
+    next = contents;
+  } else if (oldString != null) {
     if (!current.includes(oldString)) {
-      return { ok: false, error: 'old_string not found', path };
+      const key = `${path}\0${oldString}`;
+      const seen = (misses.get(key) || 0) + 1;
+      misses.set(key, seen);
+      const around = nearby(current, oldString);
+      if (seen >= 2) {
+        return {
+          ok: false, stopped: true, path, around,
+          error: 'same old_string missed twice; use start_line and end_line',
+        };
+      }
+      return {
+        ok: false, error: 'old_string not found', path, around,
+        next: 'send start_line and end_line from the numbered lines',
+      };
     }
     next = current.replace(oldString, newString);
   }
@@ -107,6 +183,9 @@ async function applyHunk(vscode, input) {
   }
   if (vscode.window && typeof vscode.window.showTextDocument === 'function') {
     await vscode.window.showTextDocument(doc, { preview: false });
+  }
+  for (const key of misses.keys()) {
+    if (key.startsWith(`${path}\0`)) misses.delete(key);
   }
   return { ok: true, path, bytes: Buffer.byteLength(next, 'utf8') };
 }

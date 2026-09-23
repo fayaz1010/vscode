@@ -39,6 +39,114 @@ function stream(chunks) {
   };
 }
 
+describe('a listed step runs and the model is not called', () => {
+  const { resetPatches, applyPatches } = require('./decision');
+
+  it('sends the chosen task to the CLI with its steps', async () => {
+    resetPatches();
+    const invoked = [];
+    let selector;
+    const plan = {
+      cursor: '1/2',
+      playbook: 'develop',
+      tasks: [
+        { id: 't.a', steps: [
+          { id: '1', text: 'read the guard', tools: ['browser_look'] },
+          { id: '2', text: 'edit the file', tools: ['vscode_editFile'] },
+        ] },
+        { id: 't.b', steps: [{ id: '3', text: 'document the env', tools: ['claude'] }] },
+      ],
+    };
+    const client = {
+      async prepare() { return prepared({ plan, task_class: 'plan' }); },
+      async scores() { return { 't.a': 0.9, 't.b': 0.1 }; },
+    };
+    const vscode = {
+      lm: {
+        async selectChatModels(sel) { selector = sel; return []; },
+        async invokeTool(name, opts) {
+          invoked.push({ name, input: opts.input });
+          return { content: [{ value: JSON.stringify({ ok: true, agent: 'cursor', stdout: 'edited the file' }) }] };
+        },
+      },
+    };
+    const response = stream();
+    await handleTurn({
+      client, vscode, request: { prompt: 'continue the panel' }, context: { history: [] }, response,
+    });
+    assert.equal(selector, undefined);
+    assert.equal(invoked.length, 1);
+    assert.equal(invoked[0].name, 'delegateToAgent');
+    assert.equal(invoked[0].input.agent, 'auto');
+    assert.match(invoked[0].input.task, /ONE TASK/);
+    assert.match(invoked[0].input.task, /t\.a/);
+    assert.match(invoked[0].input.task, /edit the file/);
+    assert.match(invoked[0].input.task, /Do not invent a second plan/);
+    const grown = applyPatches('default', plan.tasks);
+    assert.ok(grown.find((t) => t.id === 't.a').steps.some((s) => s.text === 'edited the file'));
+  });
+
+  it('a task that names one CLI uses that CLI', async () => {
+    resetPatches();
+    const invoked = [];
+    const plan = {
+      tasks: [
+        { id: 't.b', steps: [{ id: '3', text: 'document the env', tools: ['claude'] }] },
+      ],
+    };
+    const client = {
+      async prepare() { return prepared({ plan, task_class: 'plan', session_id: 'one-cli' }); },
+      async scores() { return { 't.b': 0.8 }; },
+    };
+    const vscode = {
+      lm: {
+        async selectChatModels() { return []; },
+        async invokeTool(name, opts) {
+          invoked.push({ name, input: opts.input });
+          return { content: [{ value: JSON.stringify({ ok: true, agent: 'claude', stdout: 'documented' }) }] };
+        },
+      },
+    };
+    await handleTurn({
+      client, vscode, request: { prompt: 'continue the panel' }, context: { history: [] }, response: stream(),
+    });
+    assert.equal(invoked[0].input.agent, 'claude');
+    assert.match(invoked[0].input.task, /document the env/);
+  });
+
+  it('a model flag chooses the CLI and travels with the task', async () => {
+    resetPatches();
+    const invoked = [];
+    const plan = {
+      tasks: [{
+        id: 't.g',
+        flags: ['--model', 'grok'],
+        steps: [{ id: '1', text: 'edit the file', tools: ['claude'] }],
+      }],
+    };
+    const client = {
+      async prepare() { return prepared({ plan, task_class: 'plan', session_id: 'grok' }); },
+      async scores() { return { 't.g': 0.9 }; },
+    };
+    const vscode = {
+      lm: {
+        async selectChatModels() { return []; },
+        async invokeTool(name, opts) {
+          invoked.push({ name, input: opts.input });
+          return { content: [{ value: JSON.stringify({ ok: true, agent: 'cursor', stdout: 'edited' }) }] };
+        },
+      },
+    };
+    await handleTurn({
+      client, vscode, request: { prompt: 'continue the panel' }, context: { history: [] }, response: stream(),
+    });
+    assert.equal(invoked[0].name, 'delegateToAgent');
+    assert.equal(invoked[0].input.agent, 'cursor');
+    assert.deepEqual(invoked[0].input.flags, ['--model', 'grok']);
+    assert.match(invoked[0].input.task, /edit the file/);
+  });
+});
+
 describe('participant contrib', () => {
   it('uses the extension id the package.json contribution will declare', () => {
     assert.equal(PARTICIPANT_ID, 'anchortrails.chat');

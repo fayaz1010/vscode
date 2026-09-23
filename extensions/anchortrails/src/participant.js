@@ -11,6 +11,9 @@
  * Keys stay on the node. Never dump the 612-tool floor.
  */
 
+const {
+  openList, route, fromCli, taskFromCli, cliAssign, note, applyPatches,
+} = require('./decision');
 const { folderPath, sessionId: workspaceSession } = require('./workspace');
 const { VENDOR } = require('./slugs');
 const { BridgeAuthError, BridgeEntitlementError } = require('./bridge');
@@ -837,6 +840,69 @@ async function closeRound({ client, vscode, sessionId, kind, drivePlan, onPlan }
   return { check, plan: next };
 }
 
+async function handToCli({
+  vscode, request, token, response, approvals, ahead, sessionId, tasks, under, task, agent, flags, scope,
+}) {
+  const call = {
+    name: 'delegateToAgent',
+    callId: 'decision',
+    input: {
+      agent: agent || 'auto',
+      task: task || ahead,
+      flags: flags || [],
+      scope: Array.isArray(scope) ? scope : [],
+    },
+  };
+  const text = await invokeTool(vscode, request, call, token, approvals);
+  let parsed = null;
+  try { parsed = JSON.parse(text); } catch { parsed = null; }
+  const step = fromCli(parsed, task || ahead);
+  if (!step) return null;
+  const action = under ? step : taskFromCli(parsed, task || ahead);
+  if (action) note(sessionId, action, under);
+  if (response && typeof response.markdown === 'function') response.markdown(ledgerLine(call, text));
+  return {
+    ok: parsed.ok !== false,
+    toolRounds: 1,
+    ledger: [{ tool: call.name, args: call.input, ok: !callFailed(text) }],
+    grew: applyPatches(sessionId, tasks),
+  };
+}
+
+async function runListed({
+  client, vscode, prepared, ahead, token, response, request, approvals, sessionId,
+}) {
+  // No scores: this turn is still a model turn. A chosen task goes to a
+  // signed-in CLI with that task's steps, and is told not to invent a second
+  // plan. Nothing on the list goes to a CLI too, to write the missing item.
+  // The API model runs only when none of those CLIs is there.
+  if (!client || typeof client.scores !== 'function') return null;
+  const tasks = applyPatches(sessionId, openList(prepared && prepared.plan));
+  if (!tasks.length) return null;
+  let scores = {};
+  try {
+    scores = (await client.scores({ ahead, options: tasks })) || {};
+  } catch {
+    return null;
+  }
+  const picked = route(tasks, scores);
+  if (picked.call_model || !picked.run.length) {
+    return handToCli({
+      vscode, request, token, response, approvals, ahead, sessionId, tasks, under: null,
+    });
+  }
+  const chosen = tasks.find((item) => item && item.id === picked.run[0]) || { id: picked.run[0] };
+  const assigned = cliAssign(chosen, ahead);
+  return handToCli({
+    vscode, request, token, response, approvals, ahead, sessionId, tasks,
+    under: chosen.id,
+    agent: assigned.agent,
+    task: assigned.task,
+    flags: assigned.flags,
+    scope: assigned.scope,
+  });
+}
+
 async function handleTurn({
   client, vscode, request, context, response, token, workspace, sessionId, toolSession, onPlan,
 }) {
@@ -953,7 +1019,11 @@ async function handleTurn({
       }
       const turn = buildTurn(prepared, ahead, context && context.history);
       lastTurn = turn;
-      const ran = await runModelRound({
+      const listed = await runListed({
+        client, vscode, prepared, ahead, token, response, request, approvals,
+        sessionId: (turn && turn.session_id) || sessionId,
+      });
+      const ran = listed || await runModelRound({
         client, vscode, turn, prompt: ahead, token, response, toolSession, catalog, request, approvals,
       });
       if (ran.cancelled) return resultMeta(turn, { error: 'cancelled' });
